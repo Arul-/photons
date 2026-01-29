@@ -1,0 +1,11 @@
+{
+  "type": "module",
+  "devDependencies": {
+    "@portel/photon": "file:../photon",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@portel/photon-core": "file:../photon-core"
+  }
+}
