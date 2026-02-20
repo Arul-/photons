@@ -24,6 +24,9 @@ export default class Telegram {
    * @param parseMode Parse mode: Markdown, MarkdownV2, or HTML
    * @param disableNotification Send silently
    * @param replyToMessageId Message ID to reply to
+   * @timeout 10s
+   * @retryable 2 2s
+   * @throttled 25/min
    */
   async send(params: {
     chatId: string | number;
@@ -50,6 +53,9 @@ export default class Telegram {
    * @param photo Photo URL or file_id
    * @param caption Photo caption
    * @param parseMode Parse mode for caption
+   * @timeout 15s
+   * @retryable 2 2s
+   * @throttled 25/min
    */
   async sendPhoto(params: {
     chatId: string | number;
@@ -73,6 +79,9 @@ export default class Telegram {
    * @param chatId Chat ID or @username
    * @param document Document URL or file_id
    * @param caption Document caption
+   * @timeout 30s
+   * @retryable 2 3s
+   * @throttled 25/min
    */
   async sendDocument(params: {
     chatId: string | number;
@@ -94,6 +103,8 @@ export default class Telegram {
    * @param chatId Chat ID or @username
    * @param latitude Latitude
    * @param longitude Longitude
+   * @timeout 10s
+   * @retryable 2 2s
    */
   async sendLocation(params: {
     chatId: string | number;
@@ -114,6 +125,8 @@ export default class Telegram {
    * @param options Poll options (2-10 options)
    * @param isAnonymous Is the poll anonymous
    * @param type Poll type: regular or quiz
+   * @timeout 10s
+   * @retryable 2 2s
    */
   async sendPoll(params: {
     chatId: string | number;
@@ -211,6 +224,8 @@ export default class Telegram {
 
   /**
    * Get bot information
+   * @timeout 10s
+   * @cached 5m
    */
   async getMe() {
     return this._request('getMe', {});
@@ -219,6 +234,8 @@ export default class Telegram {
   /**
    * Get chat information
    * @param chatId Chat ID or @username
+   * @timeout 10s
+   * @cached 5m
    */
   async getChat(params: { chatId: string | number }) {
     return this._request('getChat', { chat_id: params.chatId });
@@ -229,6 +246,7 @@ export default class Telegram {
    * @param offset Update offset
    * @param limit Maximum updates to return
    * @param timeout Long polling timeout in seconds
+   * @timeout 30s
    */
   async getUpdates(params?: {
     offset?: number;
@@ -247,6 +265,8 @@ export default class Telegram {
    * Delete a message
    * @param chatId Chat ID
    * @param messageId Message ID to delete
+   * @timeout 10s
+   * @retryable 2 2s
    */
   async deleteMessage(params: {
     chatId: string | number;
@@ -263,6 +283,8 @@ export default class Telegram {
    * @param chatId Chat ID
    * @param messageId Message ID to pin
    * @param disableNotification Don't notify members
+   * @timeout 10s
+   * @retryable 2 2s
    */
   async pinMessage(params: {
     chatId: string | number;

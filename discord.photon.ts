@@ -20,6 +20,9 @@ export default class Discord {
    * @param content Message content (max 2000 chars)
    * @param username Override the webhook's default username
    * @param avatarUrl Override the webhook's default avatar
+   * @timeout 10s
+   * @retryable 2 2s
+   * @throttled 8/sec
    */
   async send(params: {
     content: string;
@@ -57,6 +60,9 @@ export default class Discord {
    * @param thumbnail Thumbnail URL
    * @param image Image URL
    * @param url URL to link the title to
+   * @timeout 10s
+   * @retryable 2 2s
+   * @throttled 8/sec
    */
   async embed(params: {
     title?: string;
