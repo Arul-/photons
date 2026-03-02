@@ -4,22 +4,15 @@
  * Classic Connect Four game where you drop discs into columns trying to
  * get four in a row. The AI opponent uses minimax with alpha-beta pruning
  * to play strategically. Distributed locks ensure no two moves happen
- * simultaneously — critical when multiple clients connect to the same game.
- *
- * ## Quick Reference
- * - `newGame` — Start a new game
- * - `dropPiece` — Drop your disc into a column (1-7)
- * - `board` — View current board state
- * - `games` — List your games
- * - `stats` — Win/loss statistics
+ * simultaneously - critical when multiple clients connect to the same game.
  *
  * @version 1.0.0
  * @author Portel
  * @license MIT
- * @dependencies @portel/photon-core@latest
  * @tags game, connect-four, ai-opponent, locks, daemon
  * @icon 🔴
  * @stateful
+ * @forkedFrom portel-dev/photons#connect-four
  */
 
 import { PhotonMCP } from '@portel/photon-core';
@@ -36,6 +29,7 @@ type Cell = 0 | 1 | 2; // 0=empty, 1=player (🔴), 2=AI (🟡)
 type Board = Cell[][]; // 6 rows x 7 columns
 
 type Difficulty = 'easy' | 'medium' | 'hard';
+type OpponentMode = 'builtin' | 'mcp';
 
 interface Game {
   id: string;
@@ -43,6 +37,7 @@ interface Game {
   currentTurn: 'player' | 'ai';
   status: 'active' | 'player_wins' | 'ai_wins' | 'draw';
   difficulty: Difficulty;
+  opponentMode: OpponentMode;
   playerName: string;
   moves: Array<{ column: number; player: 'player' | 'ai' }>;
   createdAt: string;
@@ -274,15 +269,17 @@ function getAIMove(board: Board, difficulty: Difficulty): number {
 // ════════════════════════════════════════════════════════════════════════════════
 
 function renderBoard(board: Board): string {
-  const symbols: Record<number, string> = { 0: '⚫', 1: '🔴', 2: '🟡' };
+  const symbols: Record<number, string> = { 0: '·', 1: '🔴', 2: '🟡' };
   const lines: string[] = [];
 
-  lines.push(' 1️⃣  2️⃣  3️⃣  4️⃣  5️⃣  6️⃣  7️⃣');
+  // Column numbers
+  lines.push('  1   2   3   4   5   6   7');
+
   for (let r = 0; r < ROWS; r++) {
-    lines.push('│' + board[r].map(c => ` ${symbols[c]} `).join('│') + '│');
-    if (r < ROWS - 1) lines.push('├────┼────┼────┼────┼────┼────┼────┤');
+    lines.push('| ' + board[r].map(c => symbols[c]).join(' | ') + ' |');
+    if (r < ROWS - 1) lines.push('+---+---+---+---+---+---+---+');
   }
-  lines.push('╰────┴────┴────┴────┴────┴────┴────╯');
+  lines.push('+---+---+---+---+---+---+---+');
 
   return lines.join('\n');
 }
@@ -352,7 +349,12 @@ export default class ConnectFourPhoton extends PhotonMCP {
   private loadData(): GameData {
     try {
       if (existsSync(DATA_PATH)) {
-        return JSON.parse(readFileSync(DATA_PATH, 'utf-8'));
+        const data: GameData = JSON.parse(readFileSync(DATA_PATH, 'utf-8'));
+        // Backfill opponentMode for old games
+        for (const g of data.games) {
+          if (!g.opponentMode) g.opponentMode = 'builtin';
+        }
+        return data;
       }
     } catch {}
     return { games: [], stats: { wins: 0, losses: 0, draws: 0, gamesPlayed: 0 } };
@@ -381,7 +383,7 @@ export default class ConnectFourPhoton extends PhotonMCP {
     }
 
     if (!game) {
-      throw new Error('No active game found. Use newGame() to start one.');
+      throw new Error('No active game found. Use start() to start one.');
     }
 
     return game;
@@ -394,25 +396,47 @@ export default class ConnectFourPhoton extends PhotonMCP {
   /**
    * Start a new Connect Four game
    *
-   * You play as 🔴 (Red), AI plays as 🟡 (Yellow).
+   * You play as 🔴 (Red), opponent plays as 🟡 (Yellow).
    * Player always goes first.
    *
-   * @example newGame()
-   * @example newGame({ difficulty: "hard", playerName: "Alice" })
+   * In "builtin" mode, a minimax AI responds automatically after each move.
+   * In "mcp" mode, the MCP client (you, the AI assistant) plays as 🟡
+   * by calling drop on your turn.
+   *
+   * @example start()
+   * @example start({ difficulty: "hard", playerName: "Alice" })
+   * @example start({ opponent: "mcp" })
    */
-  async newGame(params?: {
-    /** AI difficulty (default: medium) */
-    difficulty?: Difficulty;
-    /** Your name */
-    playerName?: string;
-  }): Promise<{
-    gameId: string;
-    board: string;
-    message: string;
-    difficulty: Difficulty;
-  }> {
+   /**
+    * Open the Connect Four board
+    *
+    * @ui board
+    */
+   async *main(): AsyncGenerator<any, any, any> {
+     return this.board();
+   }
+
+   async start(params?: {
+     /** AI difficulty, only used in builtin mode (default: medium) */
+     difficulty?: Difficulty;
+     /** Your name */
+     playerName?: string;
+     /** Opponent mode: "builtin" for built-in AI, "mcp" for MCP client as opponent (default: builtin) */
+     opponent?: OpponentMode;
+   }): Promise<{
+     gameId: string;
+     board: string;
+     boardData: Board;
+     message: string;
+     status: string;
+     currentTurn: 'player' | 'ai';
+     difficulty: Difficulty;
+     opponentMode: OpponentMode;
+   }> {
+
     const data = this.loadData();
     const difficulty = params?.difficulty || 'medium';
+    const opponentMode = params?.opponent || 'builtin';
 
     const game: Game = {
       id: this.generateId(),
@@ -420,6 +444,7 @@ export default class ConnectFourPhoton extends PhotonMCP {
       currentTurn: 'player',
       status: 'active',
       difficulty,
+      opponentMode,
       playerName: params?.playerName || 'Player',
       moves: [],
       createdAt: new Date().toISOString(),
@@ -429,14 +454,22 @@ export default class ConnectFourPhoton extends PhotonMCP {
     data.games.push(game);
     await this.saveData(data);
 
-    this.emit({ emit: 'toast', message: `New game started! Difficulty: ${difficulty}` });
-    this.emit({ channel: 'connect-four', event: 'game-started', data: { gameId: game.id, difficulty } });
+    const modeMsg = opponentMode === 'mcp'
+      ? 'MCP client is your opponent. Player goes first — drop a piece in columns 1-7.'
+      : `Built-in AI opponent. Difficulty: ${difficulty}. Drop a piece in columns 1-7.`;
+
+    this.emit({ emit: 'toast', message: `New game started! ${opponentMode === 'mcp' ? 'MCP opponent' : `Difficulty: ${difficulty}`}` });
+    this.emit({ channel: 'connect-four', event: 'game-started', data: { gameId: game.id, difficulty, opponentMode } });
 
     return {
       gameId: game.id,
       board: renderBoard(game.board),
-      message: `Game on! You are 🔴, I am 🟡. Difficulty: ${difficulty}. Drop a piece in columns 1-7.`,
+      boardData: game.board,
+      message: `Game on! Player is 🔴, opponent is 🟡. ${modeMsg}`,
+      status: 'Your turn',
+      currentTurn: game.currentTurn,
       difficulty,
+      opponentMode,
     };
   }
 
@@ -444,23 +477,28 @@ export default class ConnectFourPhoton extends PhotonMCP {
    * Drop a piece into a column
    *
    * Uses a distributed lock to prevent simultaneous moves on the same game.
-   * After your move, the AI immediately responds with its move.
    *
-   * @example dropPiece({ column: 4 })
-   * @example dropPiece({ column: 1, gameId: "abc123" })
+   * In builtin mode: places your piece, then the built-in AI auto-responds.
+   * In MCP mode: places the current player's piece (player or AI) and switches turns.
+   * The MCP client calls this on its turn to play as 🟡.
+   *
+   * @example drop({ column: 4 })
+   * @example drop({ column: 1, gameId: "abc123" })
    */
-  async dropPiece(params: {
+  async drop(params: {
     /** Column number (1-7) */
     column: number;
     /** Game ID (uses most recent active game if omitted) */
     gameId?: string;
   }): Promise<{
     board: string;
+    boardData: Board;
     yourMove: number;
     aiMove?: number;
     status: string;
     aiComment: string;
     winner?: string;
+    currentTurn?: string;
   }> {
     const data = this.loadData();
     const game = this.findActiveGame(data, params.gameId);
@@ -474,10 +512,6 @@ export default class ConnectFourPhoton extends PhotonMCP {
         throw new Error(`Game is over: ${freshGame.status}. Start a new game.`);
       }
 
-      if (freshGame.currentTurn !== 'player') {
-        throw new Error('Not your turn! Wait for the AI to move.');
-      }
-
       const col = params.column - 1; // Convert 1-indexed to 0-indexed
       if (col < 0 || col >= COLS) {
         throw new Error(`Invalid column. Choose 1-${COLS}.`);
@@ -485,6 +519,72 @@ export default class ConnectFourPhoton extends PhotonMCP {
 
       if (freshGame.board[0][col] !== 0) {
         throw new Error(`Column ${params.column} is full. Choose another.`);
+      }
+
+      // ── MCP mode: either player can move on their turn ──
+      if (freshGame.opponentMode === 'mcp') {
+        const piece: Cell = freshGame.currentTurn === 'player' ? 1 : 2;
+        const who = freshGame.currentTurn;
+
+        dropPieceOnBoard(freshGame.board, col, piece);
+        freshGame.moves.push({ column: col, player: who });
+        freshGame.currentTurn = who === 'player' ? 'ai' : 'player';
+        freshGame.updatedAt = new Date().toISOString();
+
+        // Check win
+        if (checkWin(freshGame.board, piece)) {
+          freshGame.status = who === 'player' ? 'player_wins' : 'ai_wins';
+          if (who === 'player') { freshData.stats.wins++; } else { freshData.stats.losses++; }
+          freshData.stats.gamesPlayed++;
+          await this.saveData(freshData);
+
+          const winLabel = who === 'player' ? 'Player wins! 🎉' : 'Opponent wins! 🟡';
+          this.emit({ emit: 'toast', message: winLabel });
+          this.emit({ channel: 'connect-four', event: 'game-over', data: { gameId: freshGame.id, winner: who } });
+
+          return {
+            board: renderBoard(freshGame.board),
+            boardData: freshGame.board,
+            yourMove: params.column,
+            status: winLabel,
+            aiComment: getAICommentary(freshGame, col, who === 'player' ? 'player_wins' : 'ai_wins'),
+            winner: who,
+          };
+        }
+
+        // Check draw
+        if (isBoardFull(freshGame.board)) {
+          freshGame.status = 'draw';
+          freshData.stats.draws++;
+          freshData.stats.gamesPlayed++;
+          await this.saveData(freshData);
+
+          return {
+            board: renderBoard(freshGame.board),
+            boardData: freshGame.board,
+            yourMove: params.column,
+            status: 'Draw!',
+            aiComment: getAICommentary(freshGame, col, 'draw'),
+          };
+        }
+
+        await this.saveData(freshData);
+        this.emit({ channel: 'connect-four', event: 'move', data: { gameId: freshGame.id, col, player: who } });
+
+        const nextTurn = freshGame.currentTurn === 'player' ? 'Your turn' : 'Opponent\'s turn';
+        return {
+          board: renderBoard(freshGame.board),
+          boardData: freshGame.board,
+          yourMove: params.column,
+          status: nextTurn,
+          aiComment: '',
+          currentTurn: freshGame.currentTurn,
+        };
+      }
+
+      // ── Builtin mode: player moves, then AI auto-responds ──
+      if (freshGame.currentTurn !== 'player') {
+        throw new Error('Not your turn! Wait for the AI to move.');
       }
 
       // Player move
@@ -505,6 +605,7 @@ export default class ConnectFourPhoton extends PhotonMCP {
 
         return {
           board: renderBoard(freshGame.board),
+          boardData: freshGame.board,
           yourMove: params.column,
           status: 'You win! 🎉',
           aiComment: comment,
@@ -524,6 +625,7 @@ export default class ConnectFourPhoton extends PhotonMCP {
 
         return {
           board: renderBoard(freshGame.board),
+          boardData: freshGame.board,
           yourMove: params.column,
           status: 'Draw!',
           aiComment: comment,
@@ -550,6 +652,7 @@ export default class ConnectFourPhoton extends PhotonMCP {
 
         return {
           board: renderBoard(freshGame.board),
+          boardData: freshGame.board,
           yourMove: params.column,
           aiMove: aiCol + 1,
           status: 'AI wins! 🟡',
@@ -568,6 +671,7 @@ export default class ConnectFourPhoton extends PhotonMCP {
         const comment = getAICommentary(freshGame, aiCol, 'draw');
         return {
           board: renderBoard(freshGame.board),
+          boardData: freshGame.board,
           yourMove: params.column,
           aiMove: aiCol + 1,
           status: 'Draw!',
@@ -583,6 +687,7 @@ export default class ConnectFourPhoton extends PhotonMCP {
 
       return {
         board: renderBoard(freshGame.board),
+        boardData: freshGame.board,
         yourMove: params.column,
         aiMove: aiCol + 1,
         status: 'Your turn',
@@ -602,6 +707,7 @@ export default class ConnectFourPhoton extends PhotonMCP {
     gameId?: string;
   }): Promise<{
     board: string;
+    boardData: Board;
     gameId: string;
     status: string;
     currentTurn: string;
@@ -620,6 +726,7 @@ export default class ConnectFourPhoton extends PhotonMCP {
 
     return {
       board: renderBoard(game.board),
+      boardData: game.board,
       gameId: game.id,
       status: statusLabels[game.status],
       currentTurn: game.currentTurn,
@@ -635,6 +742,7 @@ export default class ConnectFourPhoton extends PhotonMCP {
    *
    * @example games()
    * @example games({ limit: 5 })
+   * @format table
    */
   async games(params?: {
     /** Max games to return (default 10) */
@@ -697,7 +805,7 @@ export default class ConnectFourPhoton extends PhotonMCP {
 
       this.emit({ emit: 'toast', message: 'You resigned. Better luck next time!' });
 
-      return { message: 'You resigned. The AI wins by forfeit. Start a newGame() when ready!' };
+      return { message: 'You resigned. The AI wins by forfeit. Start a start() when ready!' };
     });
   }
 
@@ -816,5 +924,220 @@ export default class ConnectFourPhoton extends PhotonMCP {
     }
 
     return { removed };
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // TESTS - run with: photon test connect-four
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * @internal
+   */
+  async testEmptyBoardRendering(): Promise<{ passed: boolean; message: string }> {
+    const board = createEmptyBoard();
+    const rendered = renderBoard(board);
+
+    // Empty cells should use · not ⚫ (invisible on dark backgrounds)
+    if (rendered.includes('⚫')) {
+      return { passed: false, message: 'Board uses ⚫ which is invisible on dark backgrounds — should use ·' };
+    }
+
+    // Should have visible empty cell markers
+    if (!rendered.includes('·')) {
+      return { passed: false, message: 'Empty board should contain · markers for empty cells' };
+    }
+
+    // Should have column numbers
+    if (!rendered.includes('1') || !rendered.includes('7')) {
+      return { passed: false, message: 'Board should show column numbers 1-7' };
+    }
+
+    // Should have 6 rows of cells
+    const cellRows = rendered.split('\n').filter(line => line.startsWith('|'));
+    if (cellRows.length !== ROWS) {
+      return { passed: false, message: `Expected ${ROWS} cell rows, got ${cellRows.length}` };
+    }
+
+    return { passed: true, message: 'Empty board renders correctly with visible markers' };
+  }
+
+  /**
+   * @internal
+   */
+  async testBoardWithPieces(): Promise<{ passed: boolean; message: string }> {
+    const board = createEmptyBoard();
+    board[5][3] = 1; // player
+    board[4][3] = 2; // ai
+    const rendered = renderBoard(board);
+
+    if (!rendered.includes('🔴')) {
+      return { passed: false, message: 'Player piece 🔴 not found in rendered board' };
+    }
+    if (!rendered.includes('🟡')) {
+      return { passed: false, message: 'AI piece 🟡 not found in rendered board' };
+    }
+
+    return { passed: true, message: 'Board renders player and AI pieces correctly' };
+  }
+
+  /**
+   * @internal
+   */
+  async testNewGameReturnsValidBoard(): Promise<{ passed: boolean; message: string }> {
+    const result = await this.start({ difficulty: 'easy', playerName: 'TestPlayer' });
+
+    if (!result.gameId) {
+      return { passed: false, message: 'start should return a gameId' };
+    }
+    if (!result.board) {
+      return { passed: false, message: 'start should return a board string' };
+    }
+    if (!result.board.includes('·')) {
+      return { passed: false, message: 'New game board should contain empty cell markers (·)' };
+    }
+    if (result.board.includes('🔴') || result.board.includes('🟡')) {
+      return { passed: false, message: 'New game board should have no pieces placed' };
+    }
+    if (result.difficulty !== 'easy') {
+      return { passed: false, message: `Expected difficulty easy, got ${result.difficulty}` };
+    }
+
+    // Cleanup
+    const data = this.loadData();
+    data.games = data.games.filter(g => g.id !== result.gameId);
+    await this.saveData(data);
+
+    return { passed: true, message: 'start returns valid initial state' };
+  }
+
+  /**
+   * @internal
+   */
+  async testDropPieceUpdatesBoard(): Promise<{ passed: boolean; message: string }> {
+    const game = await this.start({ difficulty: 'easy', playerName: 'TestPlayer' });
+    const result = await this.drop({ column: 4, gameId: game.gameId });
+
+    if (!result.board.includes('🔴')) {
+      return { passed: false, message: 'Board should contain player piece after dropping' };
+    }
+    if (result.yourMove !== 4) {
+      return { passed: false, message: `Expected yourMove=4, got ${result.yourMove}` };
+    }
+
+    // AI should have responded (unless player won, which is impossible on first move)
+    if (result.status === 'Your turn' && !result.aiMove) {
+      return { passed: false, message: 'AI should have made a move' };
+    }
+    if (result.aiMove && !result.board.includes('🟡')) {
+      return { passed: false, message: 'Board should contain AI piece after AI responds' };
+    }
+
+    // Cleanup
+    const data = this.loadData();
+    data.games = data.games.filter(g => g.id !== game.gameId);
+    await this.saveData(data);
+
+    return { passed: true, message: 'drop places piece and triggers AI response' };
+  }
+
+  /**
+   * @internal
+   */
+  async testInvalidColumn(): Promise<{ passed: boolean; message: string }> {
+    const game = await this.start({ difficulty: 'easy', playerName: 'TestPlayer' });
+
+    try {
+      await this.drop({ column: 0, gameId: game.gameId });
+      // Cleanup
+      const data = this.loadData();
+      data.games = data.games.filter(g => g.id !== game.gameId);
+      await this.saveData(data);
+      return { passed: false, message: 'Should throw for column 0' };
+    } catch (e: any) {
+      if (!e.message.includes('Invalid column')) {
+        // Cleanup
+        const data = this.loadData();
+        data.games = data.games.filter(g => g.id !== game.gameId);
+        await this.saveData(data);
+        return { passed: false, message: `Wrong error: ${e.message}` };
+      }
+    }
+
+    try {
+      await this.drop({ column: 8, gameId: game.gameId });
+      const data = this.loadData();
+      data.games = data.games.filter(g => g.id !== game.gameId);
+      await this.saveData(data);
+      return { passed: false, message: 'Should throw for column 8' };
+    } catch (e: any) {
+      if (!e.message.includes('Invalid column')) {
+        const data = this.loadData();
+        data.games = data.games.filter(g => g.id !== game.gameId);
+        await this.saveData(data);
+        return { passed: false, message: `Wrong error for col 8: ${e.message}` };
+      }
+    }
+
+    // Cleanup
+    const data = this.loadData();
+    data.games = data.games.filter(g => g.id !== game.gameId);
+    await this.saveData(data);
+
+    return { passed: true, message: 'Invalid columns (0, 8) throw errors' };
+  }
+
+  /**
+   * @internal
+   */
+  async testWinDetection(): Promise<{ passed: boolean; message: string }> {
+    // Test horizontal win
+    const board = createEmptyBoard();
+    board[5][0] = 1; board[5][1] = 1; board[5][2] = 1; board[5][3] = 1;
+    if (!checkWin(board, 1)) {
+      return { passed: false, message: 'Failed to detect horizontal win' };
+    }
+
+    // Test vertical win
+    const board2 = createEmptyBoard();
+    board2[2][0] = 2; board2[3][0] = 2; board2[4][0] = 2; board2[5][0] = 2;
+    if (!checkWin(board2, 2)) {
+      return { passed: false, message: 'Failed to detect vertical win' };
+    }
+
+    // Test diagonal win
+    const board3 = createEmptyBoard();
+    board3[5][0] = 1; board3[4][1] = 1; board3[3][2] = 1; board3[2][3] = 1;
+    if (!checkWin(board3, 1)) {
+      return { passed: false, message: 'Failed to detect diagonal win' };
+    }
+
+    // Test no win
+    const board4 = createEmptyBoard();
+    board4[5][0] = 1; board4[5][1] = 1; board4[5][2] = 1;
+    if (checkWin(board4, 1)) {
+      return { passed: false, message: 'False positive: detected win with only 3 in a row' };
+    }
+
+    return { passed: true, message: 'Win detection works for horizontal, vertical, diagonal, and no-win cases' };
+  }
+
+  /**
+   * @internal
+   */
+  async testStatsTracking(): Promise<{ passed: boolean; message: string }> {
+    const stats = await this.stats();
+
+    if (typeof stats.wins !== 'number' || typeof stats.losses !== 'number' ||
+        typeof stats.draws !== 'number' || typeof stats.gamesPlayed !== 'number') {
+      return { passed: false, message: 'Stats should have numeric wins, losses, draws, gamesPlayed' };
+    }
+    if (!stats.winRate) {
+      return { passed: false, message: 'Stats should include winRate' };
+    }
+    if (!stats.currentStreak || typeof stats.currentStreak.count !== 'number') {
+      return { passed: false, message: 'Stats should include currentStreak with count' };
+    }
+
+    return { passed: true, message: 'Stats returns valid structure' };
   }
 }
