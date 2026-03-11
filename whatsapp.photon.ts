@@ -120,6 +120,16 @@ export default class WhatsApp extends Photon {
     });
 
     if (first.type === 'error') {
+      const code = Number(first.reason);
+      // Session invalid — clear stale credentials and retry to get a fresh QR
+      if (code === 440 || code === 401) {
+        this._clearAuth();
+        this.sock?.end(undefined);
+        this.sock = null;
+        this.emit({ type: 'session_expired', reason: code, message: 'Stale session cleared. Reconnecting for fresh QR...' });
+        // Retry once — will now get a QR since credentials are gone
+        return this.connect();
+      }
       throw new Error(`Connection failed: ${first.reason}`);
     }
 
@@ -250,15 +260,37 @@ export default class WhatsApp extends Photon {
         this.connected = false;
         this.qrPending = false;
         const reason = (lastDisconnect?.error as any)?.output?.statusCode;
-        const shouldReconnect = reason !== DisconnectReason.loggedOut;
 
         this.emit({ type: 'disconnected', reason });
 
-        if (shouldReconnect) {
-          this.reconnectAttempts++;
-          const delay = Math.min(1000 * 2 ** Math.min(this.reconnectAttempts - 1, 6), 120_000);
-          setTimeout(() => this._reconnect().catch(() => {}), delay);
+        // 440 = session replaced, 401 = unauthorized, loggedOut = explicit logout
+        // These mean credentials are invalid — clear them and stop retrying.
+        const isSessionDead =
+          reason === DisconnectReason.loggedOut ||
+          reason === 440 ||
+          reason === 401;
+
+        if (isSessionDead) {
+          this._clearAuth();
+          this.reconnectAttempts = 0;
+          this.emit({ type: 'session_expired', reason, message: 'Credentials cleared. Call connect() to re-authenticate with QR.' });
+          return;
         }
+
+        // 503 = rate limited — use longer backoff
+        const isRateLimited = reason === 503;
+
+        // Cap reconnect attempts to avoid infinite retry storms
+        if (this.reconnectAttempts >= 10) {
+          this.emit({ type: 'reconnect_exhausted', attempts: this.reconnectAttempts });
+          this.reconnectAttempts = 0;
+          return;
+        }
+
+        this.reconnectAttempts++;
+        const baseDelay = isRateLimited ? 30_000 : 1000;
+        const delay = Math.min(baseDelay * 2 ** Math.min(this.reconnectAttempts - 1, 6), 120_000);
+        setTimeout(() => this._reconnect().catch(() => {}), delay);
       } else if (connection === 'open') {
         this.connected = true;
         this.qrPending = false;
@@ -355,6 +387,18 @@ export default class WhatsApp extends Photon {
       }
     } finally {
       this.flushing = false;
+    }
+  }
+
+  private _clearAuth(): void {
+    try {
+      const entries = fs.readdirSync(this.authDir);
+      for (const entry of entries) {
+        fs.rmSync(path.join(this.authDir, entry), { recursive: true, force: true });
+      }
+      this.emit({ type: 'auth_cleared' });
+    } catch {
+      // Auth dir may not exist
     }
   }
 
