@@ -48,32 +48,87 @@ export default class WhatsAppBridge extends Photon {
   }
 
   /**
-   * Connect to WhatsApp. Check status() for connection state.
-   * If authentication is needed, a QR code will be available via the qr() method.
+   * Connect to WhatsApp. Shows QR code if authentication is needed,
+   * then resolves once connected.
    */
-  async connect(): Promise<{ status: string; phone?: string }> {
+  async *connect() {
     if (this.connected) {
       return { status: 'already_connected', phone: this.phoneNumber };
     }
 
-    await this._initSocket();
-    return { status: 'connecting' };
-  }
+    yield { emit: 'status', message: 'Fetching WhatsApp protocol version...' };
 
-  /**
-   * Get the current QR code for WhatsApp authentication.
-   * Returns the QR data string to scan with WhatsApp → Linked Devices → Link a Device.
-   * Returns null if no QR code is pending (already connected or not yet requested).
-   * @format qr
-   */
-  async qr(): Promise<{ value: string; message: string } | { value: null; message: string }> {
-    if (this.connected) {
-      return { value: null, message: 'Already connected' };
+    const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
+    const { version } = await fetchLatestBaileysVersion();
+
+    yield { emit: 'status', message: 'Initializing socket...' };
+
+    // Promise that resolves on first meaningful event: QR, open, or close
+    let resolveOutcome!: (value: { type: 'qr'; code: string } | { type: 'open' } | { type: 'error'; reason: string }) => void;
+    const outcome = new Promise<{ type: 'qr'; code: string } | { type: 'open' } | { type: 'error'; reason: string }>(
+      resolve => { resolveOutcome = resolve; },
+    );
+
+    this.sock = makeWASocket({
+      version,
+      auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, logger),
+      },
+      printQRInTerminal: false,
+      browser: Browsers.macOS('Chrome'),
+      logger,
+    });
+
+    // Wire persistent event handlers (messages, creds, reconnect)
+    this._wireSocketEvents(saveCreds);
+
+    // One-shot listener for this connect flow
+    const onUpdate = (update: any) => {
+      if (update.qr) resolveOutcome({ type: 'qr', code: update.qr });
+      else if (update.connection === 'open') resolveOutcome({ type: 'open' });
+      else if (update.connection === 'close') {
+        const reason = (update.lastDisconnect?.error as any)?.output?.statusCode;
+        resolveOutcome({ type: 'error', reason: String(reason || 'unknown') });
+      }
+    };
+    this.sock.ev.on('connection.update', onUpdate);
+
+    const first = await outcome;
+
+    if (first.type === 'error') {
+      throw new Error(`Connection failed: ${first.reason}`);
     }
-    if (!this._lastQR) {
-      return { value: null, message: 'No QR code available. Call connect() first.' };
+
+    if (first.type === 'qr') {
+      this.qrPending = true;
+      this._lastQR = first.code;
+      yield { emit: 'qr', value: first.code, message: 'Scan with WhatsApp → Linked Devices → Link a Device' };
+
+      yield { emit: 'status', message: 'Waiting for QR scan...' };
+      const connected = await new Promise<boolean>(resolve => {
+        const timeout = setTimeout(() => resolve(false), 120_000);
+        const handler = (update: any) => {
+          if (update.connection === 'open') {
+            clearTimeout(timeout);
+            this.sock?.ev.off('connection.update', handler);
+            resolve(true);
+          } else if (update.connection === 'close') {
+            clearTimeout(timeout);
+            this.sock?.ev.off('connection.update', handler);
+            resolve(false);
+          }
+        };
+        this.sock?.ev.on('connection.update', handler);
+      });
+
+      if (!connected) {
+        throw new Error('QR scan timed out or connection failed');
+      }
     }
-    return { value: this._lastQR, message: 'Scan with WhatsApp → Linked Devices → Link a Device' };
+
+    yield { emit: 'toast', message: 'WhatsApp connected!', type: 'success' };
+    return { status: 'connected', phone: this.phoneNumber };
   }
 
   /**
@@ -164,43 +219,24 @@ export default class WhatsAppBridge extends Photon {
 
   // ─── Internal ──────────────────────────────────────────────────
 
-  private async _initSocket(): Promise<void> {
-    const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
-    const { version } = await fetchLatestBaileysVersion();
-
-    this.sock = makeWASocket({
-      version,
-      auth: {
-        creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, logger),
-      },
-      printQRInTerminal: false,
-      browser: Browsers.macOS('Chrome'),
-      logger: logger,
-    });
+  private _wireSocketEvents(saveCreds: () => Promise<void>): void {
+    if (!this.sock) return;
 
     this.sock.ev.on('connection.update', (update) => {
-      const { connection, lastDisconnect, qr } = update;
-
-      if (qr) {
-        this.qrPending = true;
-        this._lastQR = qr;
-        this.emit({ type: 'qr', code: qr });
-      }
+      const { connection, lastDisconnect } = update;
 
       if (connection === 'close') {
         this.connected = false;
         this.qrPending = false;
         const reason = (lastDisconnect?.error as any)?.output?.statusCode;
         const shouldReconnect = reason !== DisconnectReason.loggedOut;
-        console.error(`[whatsapp-bridge] Connection closed, reason=${reason}, reconnect=${shouldReconnect}, error=${lastDisconnect?.error?.message || 'none'}`);
 
         this.emit({ type: 'disconnected', reason });
 
         if (shouldReconnect) {
           this.reconnectAttempts++;
           const delay = Math.min(1000 * 2 ** Math.min(this.reconnectAttempts - 1, 6), 120_000);
-          setTimeout(() => this._initSocket().catch(() => {}), delay);
+          setTimeout(() => this._reconnect().catch(() => {}), delay);
         }
       } else if (connection === 'open') {
         this.connected = true;
@@ -258,6 +294,24 @@ export default class WhatsAppBridge extends Photon {
         });
       }
     });
+  }
+
+  private async _reconnect(): Promise<void> {
+    const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
+    const { version } = await fetchLatestBaileysVersion();
+
+    this.sock = makeWASocket({
+      version,
+      auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, logger),
+      },
+      printQRInTerminal: false,
+      browser: Browsers.macOS('Chrome'),
+      logger,
+    });
+
+    this._wireSocketEvents(saveCreds);
   }
 
   private async _flushQueue(): Promise<void> {
