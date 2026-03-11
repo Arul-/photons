@@ -33,7 +33,7 @@ const NANOCLAW_DIR = nanoclawIdx >= 0
 const PHOTON_HOME = path.join(os.homedir(), '.photon');
 const BRIDGE_AUTH_DIR = path.join(PHOTON_HOME, 'whatsapp-bridge', 'auth');
 const RUNNER_GROUPS_DIR = path.join(PHOTON_HOME, 'agent-runner', 'groups');
-const MEMORY_DIR = path.join(PHOTON_HOME, 'state');
+const MEMORY_DIR = path.join(PHOTON_HOME, 'data');
 const MIGRATION_STATE = path.join(PHOTON_HOME, 'claw-migration.json');
 
 // Nanoclaw sources
@@ -202,7 +202,7 @@ for (const row of rows) {
   log(`  Group: ${row.name} (${row.jid}) → folder: ${row.folder}, trigger: ${row.trigger_pattern}`);
 }
 
-const routerMemoryDir = path.join(MEMORY_DIR, 'message-router', 'default');
+const routerMemoryDir = path.join(MEMORY_DIR, 'message-router');
 writeJson(path.join(routerMemoryDir, 'registry.json'), registry);
 log(`  Imported ${rows.length} groups`);
 
@@ -217,7 +217,7 @@ for (const s of sessions) {
   log(`  Session: ${s.group_folder} → ${s.session_id}`);
 }
 
-const clawMemoryDir = path.join(MEMORY_DIR, 'claw', 'default');
+const clawMemoryDir = path.join(MEMORY_DIR, 'claw');
 writeJson(path.join(clawMemoryDir, 'sessionMap.json'), sessionMap);
 log(`  Imported ${sessions.length} sessions`);
 
@@ -303,7 +303,7 @@ if (scheduledTasks.length > 0) {
     log(`  Task: ${t.name || t.id} → ${t.group_folder} (${t.schedule_value})`);
   }
 
-  const schedulerMemoryDir = path.join(MEMORY_DIR, 'group-scheduler', 'default');
+  const schedulerMemoryDir = path.join(MEMORY_DIR, 'group-scheduler');
   writeJson(path.join(schedulerMemoryDir, 'tasks.json'), tasks);
   log(`  Imported ${scheduledTasks.length} active tasks`);
 } else {

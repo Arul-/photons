@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import pino from 'pino';
 import qrcode from 'qrcode-terminal';
 
 import makeWASocket, {
@@ -13,6 +14,8 @@ import makeWASocket, {
 
 import { Photon } from '@portel/photon-core';
 
+const logger = pino({ level: process.env.PHOTON_WA_DEBUG ? 'debug' : 'silent' });
+
 /**
  * WhatsApp Bridge — live WhatsApp connection via Baileys.
  *
@@ -24,7 +27,7 @@ import { Photon } from '@portel/photon-core';
  * @icon 💬
  * @tags whatsapp, messaging, bridge, nanoclaw
  * @stateful
- * @dependencies @whiskeysockets/baileys, qrcode-terminal
+ * @dependencies @whiskeysockets/baileys@^7.0.0-rc.9, qrcode-terminal@^0.12.0, pino@^9.0.0
  */
 export default class WhatsAppBridge extends Photon {
   private sock: WASocket | null = null;
@@ -152,11 +155,11 @@ export default class WhatsAppBridge extends Photon {
     this.sock = makeWASocket({
       auth: {
         creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, undefined as any),
+        keys: makeCacheableSignalKeyStore(state.keys, logger),
       },
       printQRInTerminal: false,
       browser: Browsers.macOS('Chrome'),
-      logger: undefined as any,
+      logger: logger,
     });
 
     this.sock.ev.on('connection.update', (update) => {
@@ -174,6 +177,7 @@ export default class WhatsAppBridge extends Photon {
         this.qrPending = false;
         const reason = (lastDisconnect?.error as any)?.output?.statusCode;
         const shouldReconnect = reason !== DisconnectReason.loggedOut;
+        console.error(`[whatsapp-bridge] Connection closed, reason=${reason}, reconnect=${shouldReconnect}, error=${lastDisconnect?.error?.message || 'none'}`);
 
         this.emit({ type: 'disconnected', reason });
 

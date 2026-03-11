@@ -12,31 +12,39 @@ import { Photon } from '@portel/photon-core';
  * @icon 🦞
  * @tags orchestrator, whatsapp, agent, claw
  * @stateful
- * @photon bridge ./whatsapp-bridge.photon.ts
- * @photon router ./message-router.photon.ts
- * @photon runner ./agent-runner.photon.ts
- * @photon scheduler ./group-scheduler.photon.ts
  */
 export default class Claw extends Photon {
-  private bridge: any;
-  private router: any;
-  private runner: any;
-  private scheduler: any;
   private running = false;
   private sessionMap: Record<string, string> = {}; // groupFolder → sessionId
-
-  constructor(bridge: any, router: any, runner: any, scheduler: any) {
-    super();
-    this.bridge = bridge;
-    this.router = router;
-    this.runner = runner;
-    this.scheduler = scheduler;
-  }
 
   async onInitialize(): Promise<void> {
     const saved = await this.memory.get<Record<string, string>>('sessionMap');
     if (saved) this.sessionMap = saved;
   }
+
+  // Cross-photon calls via this.call() — each photon loads independently
+  private bridge = {
+    connect: () => this.call('whatsapp-bridge.connect', {}),
+    disconnect: () => this.call('whatsapp-bridge.disconnect', {}),
+    send: (params: { jid: string; text: string }) => this.call('whatsapp-bridge.send', params),
+    status: () => this.call('whatsapp-bridge.status', {}),
+    typing: (params: { jid: string; typing: boolean }) => this.call('whatsapp-bridge.typing', params),
+    onEvent: null as any, // wired via daemon events, not direct callback
+  };
+  private router = {
+    register: (params: any) => this.call('message-router.register', params),
+    unregister: (params: any) => this.call('message-router.unregister', params),
+    route: (params: any) => this.call('message-router.route', params),
+    groups: () => this.call('message-router.groups', {}),
+  };
+  private runner = {
+    run: (params: any) => this.call('agent-runner.run', params),
+    status: () => this.call('agent-runner.status', {}),
+  };
+  private scheduler = {
+    schedule: (params: any) => this.call('group-scheduler.schedule', params),
+    tasks: (params: any) => this.call('group-scheduler.tasks', params),
+  };
 
   /**
    * Start the full pipeline: connect WhatsApp, wire events, begin routing.
@@ -48,23 +56,9 @@ export default class Claw extends Photon {
     // 1. Connect WhatsApp
     await this.bridge.connect();
 
-    // 2. Wire: bridge messages → router → runner → bridge reply
-    this.bridge.onEvent?.((event: any) => {
-      if (event.type === 'message') {
-        this._handleMessage(event).catch((err: Error) => {
-          this.emit({ type: 'error', source: 'message-handler', error: err.message });
-        });
-      }
-    });
-
-    // 3. Wire: scheduler fires → runner → bridge reply
-    this.scheduler.onEvent?.((event: any) => {
-      if (event.type === 'task:fire') {
-        this._handleScheduledTask(event).catch((err: Error) => {
-          this.emit({ type: 'error', source: 'scheduler-handler', error: err.message });
-        });
-      }
-    });
+    // Event wiring happens via daemon pub/sub:
+    // whatsapp-bridge emits 'message' → claw subscribes → routes → runs → replies
+    // For now, the handle/route methods are callable directly for testing.
 
     this.running = true;
     this.emit({ type: 'started' });
@@ -143,11 +137,16 @@ export default class Claw extends Photon {
     groups: any[];
     scheduledTasks: any[];
   }> {
+    // Each call may fail if the target photon isn't loaded yet — catch gracefully
+    const safe = async (fn: () => Promise<any>, fallback: any = null) => {
+      try { return await fn(); } catch { return fallback; }
+    };
+
     const [whatsapp, runnerStatus, groups, scheduledTasks] = await Promise.all([
-      this.bridge.status(),
-      this.runner.status(),
-      this.router.groups(),
-      this.scheduler.tasks({}),
+      safe(() => this.bridge.status(), { status: 'unknown' }),
+      safe(() => this.runner.status(), { active: [], queued: 0 }),
+      safe(() => this.router.groups(), []),
+      safe(() => this.scheduler.tasks({}), []),
     ]);
 
     return {
@@ -182,7 +181,7 @@ export default class Claw extends Photon {
       type: 'routing',
       jid: event.chatJid,
       folder: decision.folder,
-      textPreview: event.message.text.slice(0, 80),
+      textPreview: event.message.content.slice(0, 80),
     });
 
     // Show typing indicator
