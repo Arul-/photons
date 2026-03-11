@@ -153,6 +153,7 @@ export default class WhatsAppBridge extends Photon {
     const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
 
     this.sock = makeWASocket({
+      version: [2, 3000, 1034074495], // Fix 405: github.com/WhiskeySockets/Baileys/issues/2376
       auth: {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger),
