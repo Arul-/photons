@@ -48,26 +48,26 @@ export default class WhatsApp extends Photon {
   }
 
   /**
-   * Connect to WhatsApp. Shows QR code if authentication is needed,
-   * then resolves once connected.
+   * Connect to WhatsApp.
+   *
+   * If already authenticated, connects immediately.
+   * If not, returns a QR code to scan. The connection completes
+   * asynchronously — call status() to check when it's ready.
+   *
+   * @format qr
    */
-  async *connect() {
+  async connect(): Promise<{
+    status: 'already_connected' | 'connected' | 'qr_pending';
+    phone?: string;
+    qr?: string;
+    message?: string;
+  }> {
     if (this.connected) {
       return { status: 'already_connected', phone: this.phoneNumber };
     }
 
-    yield { emit: 'status', message: 'Fetching WhatsApp protocol version...' };
-
     const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
     const { version } = await fetchLatestBaileysVersion();
-
-    yield { emit: 'status', message: 'Initializing socket...' };
-
-    // Promise that resolves on first meaningful event: QR, open, or close
-    let resolveOutcome!: (value: { type: 'qr'; code: string } | { type: 'open' } | { type: 'error'; reason: string }) => void;
-    const outcome = new Promise<{ type: 'qr'; code: string } | { type: 'open' } | { type: 'error'; reason: string }>(
-      resolve => { resolveOutcome = resolve; },
-    );
 
     this.sock = makeWASocket({
       version,
@@ -83,52 +83,44 @@ export default class WhatsApp extends Photon {
     // Wire persistent event handlers (messages, creds, reconnect)
     this._wireSocketEvents(saveCreds);
 
-    // One-shot listener for this connect flow
-    const onUpdate = (update: any) => {
-      if (update.qr) resolveOutcome({ type: 'qr', code: update.qr });
-      else if (update.connection === 'open') resolveOutcome({ type: 'open' });
-      else if (update.connection === 'close') {
-        const reason = (update.lastDisconnect?.error as any)?.output?.statusCode;
-        resolveOutcome({ type: 'error', reason: String(reason || 'unknown') });
-      }
-    };
-    this.sock.ev.on('connection.update', onUpdate);
-
-    const first = await outcome;
+    // Wait for first meaningful event: QR, open, or close
+    const first = await new Promise<
+      { type: 'qr'; code: string } | { type: 'open' } | { type: 'error'; reason: string }
+    >((resolve) => {
+      const onUpdate = (update: any) => {
+        if (update.qr) {
+          this.sock?.ev.off('connection.update', onUpdate);
+          resolve({ type: 'qr', code: update.qr });
+        } else if (update.connection === 'open') {
+          this.sock?.ev.off('connection.update', onUpdate);
+          resolve({ type: 'open' });
+        } else if (update.connection === 'close') {
+          this.sock?.ev.off('connection.update', onUpdate);
+          const reason = (update.lastDisconnect?.error as any)?.output?.statusCode;
+          resolve({ type: 'error', reason: String(reason || 'unknown') });
+        }
+      };
+      this.sock!.ev.on('connection.update', onUpdate);
+    });
 
     if (first.type === 'error') {
       throw new Error(`Connection failed: ${first.reason}`);
     }
 
-    if (first.type === 'qr') {
-      this.qrPending = true;
-      this._lastQR = first.code;
-      yield { emit: 'qr', value: first.code, message: 'Scan with WhatsApp → Linked Devices → Link a Device' };
-
-      yield { emit: 'status', message: 'Waiting for QR scan...' };
-      const connected = await new Promise<boolean>(resolve => {
-        const timeout = setTimeout(() => resolve(false), 120_000);
-        const handler = (update: any) => {
-          if (update.connection === 'open') {
-            clearTimeout(timeout);
-            this.sock?.ev.off('connection.update', handler);
-            resolve(true);
-          } else if (update.connection === 'close') {
-            clearTimeout(timeout);
-            this.sock?.ev.off('connection.update', handler);
-            resolve(false);
-          }
-        };
-        this.sock?.ev.on('connection.update', handler);
-      });
-
-      if (!connected) {
-        throw new Error('QR scan timed out or connection failed');
-      }
+    if (first.type === 'open') {
+      // Had saved credentials — connected immediately
+      return { status: 'connected', phone: this.phoneNumber };
     }
 
-    yield { emit: 'toast', message: 'WhatsApp connected!', type: 'success' };
-    return { status: 'connected', phone: this.phoneNumber };
+    // QR needed — return it immediately, connection completes async
+    // _wireSocketEvents already handles connection.open → sets connected + phone
+    this.qrPending = true;
+    this._lastQR = first.code;
+    return {
+      status: 'qr_pending',
+      qr: first.code,
+      message: 'Scan with WhatsApp → Linked Devices → Link a Device, then call status() to verify.',
+    };
   }
 
   /**
@@ -175,12 +167,14 @@ export default class WhatsApp extends Photon {
     phone: string;
     queuedMessages: number;
     reconnectAttempts: number;
+    qr?: string;
   }> {
     return {
       status: this.connected ? 'connected' : this.qrPending ? 'qr_pending' : 'disconnected',
       phone: this.phoneNumber,
       queuedMessages: this.outgoingQueue.length,
       reconnectAttempts: this.reconnectAttempts,
+      ...(this._lastQR ? { qr: this._lastQR } : {}),
     };
   }
 
