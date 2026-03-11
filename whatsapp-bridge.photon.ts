@@ -2,7 +2,6 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import pino from 'pino';
-import qrcode from 'qrcode-terminal';
 
 import makeWASocket, {
   Browsers,
@@ -27,7 +26,7 @@ const logger = pino({ level: process.env.PHOTON_WA_DEBUG ? 'debug' : 'silent' })
  * @icon 💬
  * @tags whatsapp, messaging, bridge, nanoclaw
  * @stateful
- * @dependencies @whiskeysockets/baileys@^7.0.0-rc.9, qrcode-terminal@^0.12.0, pino@^9.0.0
+ * @dependencies @whiskeysockets/baileys@^7.0.0-rc.9, pino@^9.0.0
  */
 export default class WhatsAppBridge extends Photon {
   private sock: WASocket | null = null;
@@ -38,6 +37,7 @@ export default class WhatsAppBridge extends Photon {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private knownGroups: Record<string, string> = {}; // jid → name
+  private _lastQR: string | null = null;
 
   private get authDir(): string {
     const base = process.env.PHOTON_WHATSAPP_AUTHDIR
@@ -47,10 +47,8 @@ export default class WhatsAppBridge extends Photon {
   }
 
   /**
-   * Connect to WhatsApp. Prints a QR code if not yet authenticated.
-   * Emits { type: 'connected', phone } when the session opens, or
-   * { type: 'qr', code } if authentication is required.
-   * @readOnly
+   * Connect to WhatsApp. Check status() for connection state.
+   * If authentication is needed, a QR code will be available via the qr() method.
    */
   async connect(): Promise<{ status: string; phone?: string }> {
     if (this.connected) {
@@ -59,6 +57,22 @@ export default class WhatsAppBridge extends Photon {
 
     await this._initSocket();
     return { status: 'connecting' };
+  }
+
+  /**
+   * Get the current QR code for WhatsApp authentication.
+   * Returns the QR data string to scan with WhatsApp → Linked Devices → Link a Device.
+   * Returns null if no QR code is pending (already connected or not yet requested).
+   * @format qr
+   */
+  async qr(): Promise<{ value: string; message: string } | { value: null; message: string }> {
+    if (this.connected) {
+      return { value: null, message: 'Already connected' };
+    }
+    if (!this._lastQR) {
+      return { value: null, message: 'No QR code available. Call connect() first.' };
+    }
+    return { value: this._lastQR, message: 'Scan with WhatsApp → Linked Devices → Link a Device' };
   }
 
   /**
@@ -168,8 +182,7 @@ export default class WhatsAppBridge extends Photon {
 
       if (qr) {
         this.qrPending = true;
-        console.log('\n🔑 Scan this QR code with WhatsApp:\n');
-        qrcode.generate(qr, { small: true });
+        this._lastQR = qr;
         this.emit({ type: 'qr', code: qr });
       }
 
@@ -196,6 +209,7 @@ export default class WhatsAppBridge extends Photon {
           this.phoneNumber = this.sock.user.id.split(':')[0];
         }
 
+        this._lastQR = null;
         this.emit({ type: 'connected', phone: this.phoneNumber });
         this._flushQueue().catch(() => {});
         this._syncGroups().catch(() => {});
