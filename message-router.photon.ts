@@ -7,8 +7,8 @@ import { Photon } from '@portel/photon-core';
  * `route()`, it checks the trigger pattern and registered groups, then
  * emits a routing decision for the agent runner to act on.
  *
- * Pair with whatsapp-bridge (subscribe to its 'message' events and
- * call router.route() for each one).
+ * Pair with whatsapp (poll its pending() method and
+ * call router.route() for each message).
  *
  * @version 1.0.0
  * @icon 🔀

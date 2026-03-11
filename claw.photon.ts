@@ -3,11 +3,11 @@ import { Photon } from '@portel/photon-core';
 /**
  * Claw — orchestrates WhatsApp ↔ Claude agent pipeline.
  *
- * Wires four photons together:
- *   whatsapp-bridge → message-router → agent-runner → whatsapp-bridge
+ * Wires photons together:
+ *   whatsapp → message-router → agent-runner → whatsapp
  *
  * Prerequisites:
- *   1. Run `photon whatsapp-bridge connect` once to authenticate
+ *   1. Run `photon whatsapp connect` once to authenticate
  *   2. Register groups via `photon claw register --jid ... --name ... --folder ... --trigger ...`
  *   3. Run `photon claw start` to begin the pipeline
  *
@@ -30,12 +30,12 @@ export default class Claw extends Photon {
 
   // Cross-photon calls via this.call()
   private bridge = {
-    connect: () => this.call('whatsapp-bridge.connect', {}),
-    disconnect: () => this.call('whatsapp-bridge.disconnect', {}),
-    send: (params: { jid: string; text: string }) => this.call('whatsapp-bridge.send', params),
-    status: () => this.call('whatsapp-bridge.status', {}),
-    pending: () => this.call('whatsapp-bridge.pending', {}),
-    typing: (params: { jid: string; typing: boolean }) => this.call('whatsapp-bridge.typing', params),
+    connect: () => this.call('whatsapp.connect', {}),
+    disconnect: () => this.call('whatsapp.disconnect', {}),
+    send: (params: { jid: string; text: string }) => this.call('whatsapp.send', params),
+    status: () => this.call('whatsapp.status', {}),
+    pending: () => this.call('whatsapp.pending', {}),
+    typing: (params: { jid: string; typing: boolean }) => this.call('whatsapp.typing', params),
   };
   private router = {
     register: (params: any) => this.call('message-router.register', params),
@@ -50,7 +50,7 @@ export default class Claw extends Photon {
 
   /**
    * Start the pipeline: verify WhatsApp connection, begin polling for messages.
-   * WhatsApp must be connected first via `photon whatsapp-bridge connect`.
+   * WhatsApp must be connected first via `photon whatsapp connect`.
    */
   async start(): Promise<{ status: string; phone?: string; groups?: number }> {
     if (this.running) return { status: 'already running' };
@@ -60,7 +60,7 @@ export default class Claw extends Photon {
     if (waStatus.status !== 'connected') {
       throw new Error(
         `WhatsApp is not connected (status: ${waStatus.status}). ` +
-        `Run 'photon whatsapp-bridge connect' first to authenticate.`
+        `Run 'photon whatsapp connect' first to authenticate.`
       );
     }
 

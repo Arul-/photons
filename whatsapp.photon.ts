@@ -17,19 +17,18 @@ import { Photon } from '@portel/photon-core';
 const logger = pino({ level: process.env.PHOTON_WA_DEBUG ? 'debug' : 'silent' });
 
 /**
- * WhatsApp Bridge — live WhatsApp connection via Baileys.
+ * WhatsApp — live WhatsApp connection via Baileys.
  *
  * Manages authentication, message delivery, and group metadata.
- * Emits inbound messages as events so other photons (e.g. message-router)
- * can subscribe and act on them.
+ * Buffers inbound messages for polling by orchestrators (e.g. claw).
  *
  * @version 1.0.0
  * @icon 💬
- * @tags whatsapp, messaging, bridge, nanoclaw
+ * @tags whatsapp, messaging, nanoclaw
  * @stateful
  * @dependencies @whiskeysockets/baileys@^7.0.0-rc.9, pino@^9.0.0
  */
-export default class WhatsAppBridge extends Photon {
+export default class WhatsApp extends Photon {
   private sock: WASocket | null = null;
   private connected = false;
   private qrPending = false;
@@ -43,7 +42,7 @@ export default class WhatsAppBridge extends Photon {
 
   private get authDir(): string {
     const base = process.env.PHOTON_WHATSAPP_AUTHDIR
-      || path.join(os.homedir(), '.photon', 'whatsapp-bridge', 'auth');
+      || path.join(os.homedir(), '.photon', 'whatsapp', 'auth');
     fs.mkdirSync(base, { recursive: true });
     return base;
   }
@@ -309,7 +308,7 @@ export default class WhatsAppBridge extends Photon {
 
         // Also emit on channel for future pub/sub consumers
         this.emit({
-          channel: 'whatsapp-bridge:messages',
+          channel: 'whatsapp:messages',
           type: 'message',
           chatJid,
           message: inbound,
