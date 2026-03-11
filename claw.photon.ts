@@ -33,7 +33,30 @@ export default class Claw extends Photon {
     autoResume: true,
   };
 
-  async onInitialize(): Promise<void> {
+  async onInitialize(ctx?: { reason?: string; oldInstance?: any }): Promise<void> {
+    // Hot-reload: transfer running state from old instance
+    if (ctx?.reason === 'hot-reload' && ctx.oldInstance) {
+      const old = ctx.oldInstance;
+      this.running = old.running || false;
+      this.sessionMap = old.sessionMap || {};
+      this.lastHealth = old.lastHealth || null;
+      this.processing = old.processing || false;
+
+      // Transfer timers — null them on old instance so they aren't double-cleared
+      if (old.pollTimer) {
+        this.pollTimer = old.pollTimer;
+        old.pollTimer = null;
+      }
+      if (old.heartbeatTimer) {
+        this.heartbeatTimer = old.heartbeatTimer;
+        old.heartbeatTimer = null;
+      }
+
+      this.emit({ type: 'hot_reload_transferred', running: this.running });
+      return;
+    }
+
+    // Normal startup
     const saved = await this.memory.get<Record<string, string>>('sessionMap');
     if (saved) this.sessionMap = saved;
 
@@ -57,7 +80,12 @@ export default class Claw extends Photon {
     }
   }
 
-  async onShutdown(): Promise<void> {
+  async onShutdown(ctx?: { reason?: string }): Promise<void> {
+    // During hot-reload, DON'T clear timers — the new instance will take them over
+    if (ctx?.reason === 'hot-reload') {
+      return;
+    }
+
     if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
     if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; }
     this.running = false;

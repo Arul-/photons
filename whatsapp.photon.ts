@@ -47,8 +47,32 @@ export default class WhatsApp extends Photon {
     return base;
   }
 
-  async onInitialize(): Promise<void> {
-    // Auto-connect if we have saved credentials from a previous session
+  async onInitialize(ctx?: { reason?: string; oldInstance?: any }): Promise<void> {
+    // Hot-reload: take over the socket from the old instance instead of reconnecting.
+    // This avoids destroying the WhatsApp session (which could trigger 440 bans).
+    if (ctx?.reason === 'hot-reload' && ctx.oldInstance) {
+      const old = ctx.oldInstance;
+      if (old.sock && old.connected) {
+        this.sock = old.sock;
+        this.connected = old.connected;
+        this.phoneNumber = old.phoneNumber || '';
+        this.knownGroups = old.knownGroups || {};
+        this.outgoingQueue = old.outgoingQueue || [];
+        this._pendingMessages = old._pendingMessages || [];
+        this._lastQR = old._lastQR || null;
+        this.reconnectAttempts = 0;
+
+        // Null out old instance's socket reference so it can't interfere
+        old.sock = null;
+        old.connected = false;
+
+        this.emit({ type: 'hot_reload_transferred', phone: this.phoneNumber });
+        return;
+      }
+      // Old instance wasn't connected — fall through to normal auto-connect
+    }
+
+    // Normal startup: auto-connect if we have saved credentials
     const credsFile = path.join(this.authDir, 'creds.json');
     if (fs.existsSync(credsFile)) {
       this.connect().catch((err) => {
@@ -57,7 +81,14 @@ export default class WhatsApp extends Photon {
     }
   }
 
-  async onShutdown(): Promise<void> {
+  async onShutdown(ctx?: { reason?: string }): Promise<void> {
+    // During hot-reload, DON'T close the socket — the new instance will take it over.
+    // Only close on real shutdown (daemon stop, unload, etc.)
+    if (ctx?.reason === 'hot-reload') {
+      this.emit({ type: 'hot_reload_preserving_socket' });
+      return;
+    }
+
     this.connected = false;
     this.sock?.end(undefined);
     this.sock = null;
