@@ -28,8 +28,8 @@ export default class AgentRunner extends Photon {
     baseDir: path.join(os.homedir(), 'Projects'),
     /** Maximum concurrent agent runs */
     maxConcurrent: 3,
-    /** Comma-separated list of tools Claude is allowed to use */
-    allowedTools: 'WebSearch,WebFetch',
+    /** Comma-separated whitelist of tools Claude can use (empty = all tools) */
+    allowedTools: '',
     /** Claude model to use (e.g. sonnet, opus, haiku) */
     model: '',
   };
