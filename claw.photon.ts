@@ -26,6 +26,25 @@ export default class Claw extends Photon {
   async onInitialize(): Promise<void> {
     const saved = await this.memory.get<Record<string, string>>('sessionMap');
     if (saved) this.sessionMap = saved;
+
+    // Auto-resume if pipeline was running before daemon restart.
+    // Wait briefly for WhatsApp to auto-connect from saved credentials.
+    const wasRunning = await this.memory.get<boolean>('running');
+    if (wasRunning) {
+      const tryResume = async (attempts = 0): Promise<void> => {
+        try {
+          await this.start();
+          this.emit({ type: 'auto_resumed' });
+        } catch {
+          if (attempts < 5) {
+            setTimeout(() => tryResume(attempts + 1), 3000);
+          } else {
+            this.emit({ type: 'auto_resume_failed', message: 'WhatsApp not connected after retries' });
+          }
+        }
+      };
+      setTimeout(() => tryResume(), 2000);
+    }
   }
 
   // Cross-photon calls via this.call()
@@ -69,6 +88,7 @@ export default class Claw extends Photon {
 
     // 3. Start polling for messages
     this.running = true;
+    await this.memory.set('running', true);
     this.pollTimer = setInterval(() => {
       this._pollMessages().catch((err) => {
         this.emit({ type: 'poll_error', error: err.message });
@@ -94,7 +114,7 @@ export default class Claw extends Photon {
       this.pollTimer = null;
     }
     this.running = false;
-
+    await this.memory.set('running', false);
     await this.memory.set('sessionMap', this.sessionMap);
 
     this.emit({ type: 'stopped' });

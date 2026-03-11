@@ -47,6 +47,16 @@ export default class WhatsApp extends Photon {
     return base;
   }
 
+  async onInitialize(): Promise<void> {
+    // Auto-connect if we have saved credentials from a previous session
+    const credsFile = path.join(this.authDir, 'creds.json');
+    if (fs.existsSync(credsFile)) {
+      this.connect().catch((err) => {
+        this.emit({ type: 'auto_connect_failed', error: err.message });
+      });
+    }
+  }
+
   /**
    * Connect to WhatsApp.
    *
