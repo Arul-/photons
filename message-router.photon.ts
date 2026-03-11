@@ -118,11 +118,6 @@ export default class MessageRouter extends Photon {
       fromMe,
     };
 
-    // Skip own messages
-    if (fromMe) {
-      return this._ignore(jid, message, 'from_self');
-    }
-
     const group = this.registry[jid];
     if (!group) {
       return this._ignore(jid, message, 'not_registered');
@@ -134,6 +129,11 @@ export default class MessageRouter extends Photon {
       if (!trigger.test(text)) {
         return this._ignore(jid, message, 'no_trigger');
       }
+    } else if (fromMe) {
+      // Without a trigger requirement, skip own messages to prevent infinite loops.
+      // With a trigger, fromMe is allowed (e.g. "me chat" pattern where user
+      // messages themselves with a trigger like "@" to talk to the agent).
+      return this._ignore(jid, message, 'from_self');
     }
 
     // Log the message
