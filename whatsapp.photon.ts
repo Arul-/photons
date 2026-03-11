@@ -48,6 +48,9 @@ export default class WhatsApp extends Photon {
   }
 
   async onInitialize(): Promise<void> {
+    // Skip if already connected (e.g. state copied during hot-reload)
+    if (this.connected && this.sock) return;
+
     // Auto-connect if we have saved credentials from a previous session
     const credsFile = path.join(this.authDir, 'creds.json');
     if (fs.existsSync(credsFile)) {
@@ -55,6 +58,12 @@ export default class WhatsApp extends Photon {
         this.emit({ type: 'auto_connect_failed', error: err.message });
       });
     }
+  }
+
+  async onShutdown(): Promise<void> {
+    this.connected = false;
+    this.sock?.end(undefined);
+    this.sock = null;
   }
 
   /**

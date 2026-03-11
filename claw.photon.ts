@@ -57,6 +57,12 @@ export default class Claw extends Photon {
     }
   }
 
+  async onShutdown(): Promise<void> {
+    if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
+    if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; }
+    this.running = false;
+  }
+
   // Cross-photon calls via this.call()
   private bridge = {
     connect: () => this.call('whatsapp.connect', {}),
