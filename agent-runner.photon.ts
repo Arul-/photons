@@ -26,7 +26,7 @@ export default class AgentRunner extends Photon {
 
   async onInitialize(): Promise<void> {
     this.baseDir = process.env.AGENT_RUNNER_BASE_DIR
-      || path.join(os.homedir(), '.photon', 'agent-runner', 'groups');
+      || path.join(os.homedir(), 'Projects');
     fs.mkdirSync(this.baseDir, { recursive: true });
 
     const saved = await this.memory.get<number>('maxConcurrent');
@@ -257,7 +257,7 @@ export default class AgentRunner extends Photon {
         fullPrompt = `${systemPrompt}\n\n---\n\n${prompt}`;
       }
 
-      const args = ['-p', fullPrompt, '--output-format', 'json'];
+      const args = ['-p', fullPrompt, '--output-format', 'json', '--allowedTools', 'WebSearch,WebFetch'];
       if (sessionId) {
         args.push('--resume', sessionId);
       }
