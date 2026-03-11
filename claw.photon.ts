@@ -19,12 +19,16 @@ import { Photon } from '@portel/photon-core';
 export default class Claw extends Photon {
   private running = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private processing = false;
   private sessionMap: Record<string, string> = {}; // groupFolder → sessionId
+  private lastHealth: { ok: boolean; whatsapp: string; runner: string; checkedAt: string } | null = null;
 
   protected settings = {
     /** Message polling interval in milliseconds */
     pollIntervalMs: 2000,
+    /** Heartbeat interval in milliseconds (health checks) */
+    heartbeatIntervalMs: 30000,
     /** Auto-resume pipeline after daemon restart */
     autoResume: true,
   };
@@ -101,6 +105,11 @@ export default class Claw extends Photon {
       });
     }, this.settings.pollIntervalMs);
 
+    // 4. Start heartbeat for health monitoring and recovery
+    this.heartbeatTimer = setInterval(() => {
+      this._heartbeat().catch(() => {});
+    }, this.settings.heartbeatIntervalMs);
+
     this.emit({ type: 'started', phone: waStatus.phone, groups: groups.length });
     return {
       status: 'started',
@@ -118,6 +127,10 @@ export default class Claw extends Photon {
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
+    }
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
     }
     this.running = false;
     await this.memory.set('running', false);
@@ -154,6 +167,34 @@ export default class Claw extends Photon {
   }
 
   /**
+   * Show latest health check result.
+   * @readOnly
+   * @format json
+   */
+  async health(): Promise<{
+    ok: boolean;
+    running: boolean;
+    whatsapp: string;
+    runner: string;
+    checkedAt: string | null;
+  }> {
+    if (!this.running) {
+      return { ok: false, running: false, whatsapp: 'unknown', runner: 'unknown', checkedAt: null };
+    }
+    // Run a fresh check if no cached result
+    if (!this.lastHealth) {
+      await this._heartbeat();
+    }
+    return {
+      ok: this.lastHealth?.ok ?? false,
+      running: this.running,
+      whatsapp: this.lastHealth?.whatsapp ?? 'unknown',
+      runner: this.lastHealth?.runner ?? 'unknown',
+      checkedAt: this.lastHealth?.checkedAt ?? null,
+    };
+  }
+
+  /**
    * Show pipeline status.
    * @readOnly
    * @format json
@@ -178,6 +219,49 @@ export default class Claw extends Photon {
   }
 
   // ─── Internal ──────────────────────────────────────────────────
+
+  private async _heartbeat(): Promise<void> {
+    if (!this.running) return;
+
+    const checkedAt = new Date().toISOString();
+    let waStatus = 'unknown';
+    let runnerStatus = 'unknown';
+    let ok = true;
+
+    // Check WhatsApp
+    try {
+      const wa = await this.bridge.status();
+      waStatus = wa.status;
+      if (wa.status !== 'connected') {
+        ok = false;
+        this.emit({ type: 'heartbeat_warn', component: 'whatsapp', status: wa.status });
+        // Attempt reconnect
+        this.bridge.connect().catch(() => {});
+      }
+    } catch {
+      ok = false;
+      waStatus = 'unreachable';
+    }
+
+    // Check agent runner
+    try {
+      const runner = await this.runner.status();
+      runnerStatus = `active:${runner.active?.length ?? 0},queued:${runner.queued ?? 0}`;
+    } catch {
+      ok = false;
+      runnerStatus = 'unreachable';
+    }
+
+    this.lastHealth = { ok, whatsapp: waStatus, runner: runnerStatus, checkedAt };
+
+    this.emit({
+      type: 'heartbeat',
+      ok,
+      whatsapp: waStatus,
+      runner: runnerStatus,
+      checkedAt,
+    });
+  }
 
   private async _pollMessages(): Promise<void> {
     if (!this.running || this.processing) return;
