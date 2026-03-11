@@ -39,6 +39,7 @@ export default class WhatsAppBridge extends Photon {
   private flushing = false;
   private knownGroups: Record<string, string> = {}; // jid → name
   private _lastQR: string | null = null;
+  private _pendingMessages: Array<{ chatJid: string; message: InboundMessage }> = [];
 
   private get authDir(): string {
     const base = process.env.PHOTON_WHATSAPP_AUTHDIR
@@ -207,6 +208,17 @@ export default class WhatsAppBridge extends Photon {
   }
 
   /**
+   * Return and clear buffered inbound messages since last call.
+   * Used by orchestrators (e.g. claw) to poll for new messages.
+   * @readOnly
+   * @format json
+   */
+  async pending(): Promise<Array<{ chatJid: string; message: InboundMessage }>> {
+    const messages = this._pendingMessages.splice(0);
+    return messages;
+  }
+
+  /**
    * Set typing indicator for a chat.
    * @param jid WhatsApp JID
    * @param typing Whether the bot is typing
@@ -278,19 +290,29 @@ export default class WhatsAppBridge extends Photon {
         const timestamp = new Date(Number(msg.messageTimestamp) * 1000).toISOString();
         const fromMe = msg.key.fromMe || false;
 
-        // Emit inbound message for message-router to consume
+        const inbound: InboundMessage = {
+          id: msg.key.id || '',
+          chatJid,
+          sender,
+          senderName,
+          content,
+          timestamp,
+          fromMe,
+        };
+
+        // Buffer for polling via pending()
+        this._pendingMessages.push({ chatJid, message: inbound });
+        // Cap buffer to prevent unbounded growth
+        if (this._pendingMessages.length > 1000) {
+          this._pendingMessages.splice(0, this._pendingMessages.length - 1000);
+        }
+
+        // Also emit on channel for future pub/sub consumers
         this.emit({
+          channel: 'whatsapp-bridge:messages',
           type: 'message',
           chatJid,
-          message: {
-            id: msg.key.id || '',
-            chatJid,
-            sender,
-            senderName,
-            content,
-            timestamp,
-            fromMe,
-          },
+          message: inbound,
         });
       }
     });
@@ -336,4 +358,16 @@ export default class WhatsAppBridge extends Photon {
       }
     } catch {}
   }
+}
+
+// ─── Types ─────────────────────────────────────────────────────────
+
+interface InboundMessage {
+  id: string;
+  chatJid: string;
+  sender: string;
+  senderName: string;
+  content: string;
+  timestamp: string;
+  fromMe: boolean;
 }

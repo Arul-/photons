@@ -5,8 +5,11 @@ import { Photon } from '@portel/photon-core';
  *
  * Wires four photons together:
  *   whatsapp-bridge → message-router → agent-runner → whatsapp-bridge
- *                                          ↑
- *                     group-scheduler ─────┘
+ *
+ * Prerequisites:
+ *   1. Run `photon whatsapp-bridge connect` once to authenticate
+ *   2. Register groups via `photon claw register --jid ... --name ... --folder ... --trigger ...`
+ *   3. Run `photon claw start` to begin the pipeline
  *
  * @version 1.0.0
  * @icon 🦞
@@ -15,6 +18,9 @@ import { Photon } from '@portel/photon-core';
  */
 export default class Claw extends Photon {
   private running = false;
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private pollIntervalMs = 2000;
+  private processing = false;
   private sessionMap: Record<string, string> = {}; // groupFolder → sessionId
 
   async onInitialize(): Promise<void> {
@@ -22,14 +28,14 @@ export default class Claw extends Photon {
     if (saved) this.sessionMap = saved;
   }
 
-  // Cross-photon calls via this.call() — each photon loads independently
+  // Cross-photon calls via this.call()
   private bridge = {
     connect: () => this.call('whatsapp-bridge.connect', {}),
     disconnect: () => this.call('whatsapp-bridge.disconnect', {}),
     send: (params: { jid: string; text: string }) => this.call('whatsapp-bridge.send', params),
     status: () => this.call('whatsapp-bridge.status', {}),
+    pending: () => this.call('whatsapp-bridge.pending', {}),
     typing: (params: { jid: string; typing: boolean }) => this.call('whatsapp-bridge.typing', params),
-    onEvent: null as any, // wired via daemon events, not direct callback
   };
   private router = {
     register: (params: any) => this.call('message-router.register', params),
@@ -41,40 +47,54 @@ export default class Claw extends Photon {
     run: (params: any) => this.call('agent-runner.run', params),
     status: () => this.call('agent-runner.status', {}),
   };
-  private scheduler = {
-    schedule: (params: any) => this.call('group-scheduler.schedule', params),
-    tasks: (params: any) => this.call('group-scheduler.tasks', params),
-  };
 
   /**
-   * Start the full pipeline: connect WhatsApp, wire events, begin routing.
-   * Call this once after registering your groups.
+   * Start the pipeline: verify WhatsApp connection, begin polling for messages.
+   * WhatsApp must be connected first via `photon whatsapp-bridge connect`.
    */
-  async start(): Promise<{ status: string }> {
+  async start(): Promise<{ status: string; phone?: string; groups?: number }> {
     if (this.running) return { status: 'already running' };
 
-    // 1. Connect WhatsApp
-    await this.bridge.connect();
+    // 1. Check WhatsApp connection
+    const waStatus = await this.bridge.status();
+    if (waStatus.status !== 'connected') {
+      throw new Error(
+        `WhatsApp is not connected (status: ${waStatus.status}). ` +
+        `Run 'photon whatsapp-bridge connect' first to authenticate.`
+      );
+    }
 
-    // Event wiring happens via daemon pub/sub:
-    // whatsapp-bridge emits 'message' → claw subscribes → routes → runs → replies
-    // For now, the handle/route methods are callable directly for testing.
+    // 2. Check we have registered groups
+    const groups = await this.router.groups();
 
+    // 3. Start polling for messages
     this.running = true;
-    this.emit({ type: 'started' });
-    return { status: 'started' };
+    this.pollTimer = setInterval(() => {
+      this._pollMessages().catch((err) => {
+        this.emit({ type: 'poll_error', error: err.message });
+      });
+    }, this.pollIntervalMs);
+
+    this.emit({ type: 'started', phone: waStatus.phone, groups: groups.length });
+    return {
+      status: 'started',
+      phone: waStatus.phone,
+      groups: groups.length,
+    };
   }
 
   /**
-   * Stop the pipeline and disconnect WhatsApp.
+   * Stop the pipeline.
    */
   async stop(): Promise<{ status: string }> {
     if (!this.running) return { status: 'not running' };
 
-    await this.bridge.disconnect();
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
     this.running = false;
 
-    // Persist session map for continuity on restart
     await this.memory.set('sessionMap', this.sessionMap);
 
     this.emit({ type: 'stopped' });
@@ -85,7 +105,7 @@ export default class Claw extends Photon {
    * Register a WhatsApp group for agent routing.
    * @param jid WhatsApp JID {@example "123456789@g.us"}
    * @param name Display name {@example "Dev Team"}
-   * @param folder Group folder name {@example "dev-team"}
+   * @param folder Group folder name for agent context {@example "dev-team"}
    * @param trigger Trigger pattern {@example "@bot"}
    * @param requiresTrigger Only route messages with trigger (default: true)
    */
@@ -108,25 +128,7 @@ export default class Claw extends Photon {
   }
 
   /**
-   * Create a scheduled task for a group.
-   * @param groupFolder Group folder name {@example "dev-team"}
-   * @param chatJid WhatsApp JID {@example "123@g.us"}
-   * @param prompt Prompt to run {@example "Summarise yesterday's discussion"}
-   * @param cron Cron expression {@example "0 9 * * 1-5"}
-   * @param name Task name {@example "daily-standup"}
-   */
-  async schedule(params: {
-    groupFolder: string;
-    chatJid: string;
-    prompt: string;
-    cron: string;
-    name?: string;
-  }): Promise<any> {
-    return this.scheduler.schedule(params);
-  }
-
-  /**
-   * Show pipeline status: WhatsApp connection, active runs, queued, scheduled tasks.
+   * Show pipeline status.
    * @readOnly
    * @format json
    */
@@ -135,37 +137,47 @@ export default class Claw extends Photon {
     whatsapp: any;
     runner: any;
     groups: any[];
-    scheduledTasks: any[];
   }> {
-    // Each call may fail if the target photon isn't loaded yet — catch gracefully
     const safe = async (fn: () => Promise<any>, fallback: any = null) => {
       try { return await fn(); } catch { return fallback; }
     };
 
-    const [whatsapp, runnerStatus, groups, scheduledTasks] = await Promise.all([
+    const [whatsapp, runnerStatus, groups] = await Promise.all([
       safe(() => this.bridge.status(), { status: 'unknown' }),
       safe(() => this.runner.status(), { active: [], queued: 0 }),
       safe(() => this.router.groups(), []),
-      safe(() => this.scheduler.tasks({}), []),
     ]);
 
-    return {
-      running: this.running,
-      whatsapp,
-      runner: runnerStatus,
-      groups,
-      scheduledTasks,
-    };
+    return { running: this.running, whatsapp, runner: runnerStatus, groups };
   }
 
   // ─── Internal ──────────────────────────────────────────────────
+
+  private async _pollMessages(): Promise<void> {
+    if (!this.running || this.processing) return;
+    this.processing = true;
+
+    try {
+      const messages: Array<{ chatJid: string; message: any }> = await this.bridge.pending();
+      if (!messages || messages.length === 0) return;
+
+      for (const event of messages) {
+        await this._handleMessage(event).catch((err) => {
+          this.emit({ type: 'handle_error', chatJid: event.chatJid, error: err.message });
+        });
+      }
+    } finally {
+      this.processing = false;
+    }
+  }
 
   private async _handleMessage(event: {
     chatJid: string;
     message: { sender: string; senderName: string; content: string; fromMe: boolean; timestamp: string };
   }): Promise<void> {
     const msg = event.message;
-    // Route the message — map bridge event fields to router params
+
+    // Route the message
     const decision = await this.router.route({
       jid: event.chatJid,
       from: msg.sender,
@@ -181,7 +193,7 @@ export default class Claw extends Photon {
       type: 'routing',
       jid: event.chatJid,
       folder: decision.folder,
-      textPreview: event.message.content.slice(0, 80),
+      textPreview: msg.content.slice(0, 80),
     });
 
     // Show typing indicator
@@ -216,43 +228,6 @@ export default class Claw extends Photon {
         type: 'error',
         source: 'agent-runner',
         folder: decision.folder,
-        error: result.error,
-      });
-    }
-  }
-
-  private async _handleScheduledTask(event: {
-    taskId: string;
-    groupFolder: string;
-    chatJid: string;
-    prompt: string;
-  }): Promise<void> {
-    this.emit({
-      type: 'task:executing',
-      taskId: event.taskId,
-      groupFolder: event.groupFolder,
-    });
-
-    const result = await this.runner.run({
-      groupFolder: event.groupFolder,
-      prompt: event.prompt,
-      chatJid: event.chatJid,
-      systemPrompt: 'This is a scheduled task. Respond concisely.',
-    });
-
-    if (result.status === 'success' && result.output) {
-      await this.bridge.send({ jid: event.chatJid, text: result.output });
-      this.emit({
-        type: 'task:completed',
-        taskId: event.taskId,
-        groupFolder: event.groupFolder,
-        duration: result.duration,
-      });
-    } else {
-      this.emit({
-        type: 'task:failed',
-        taskId: event.taskId,
-        groupFolder: event.groupFolder,
         error: result.error,
       });
     }
