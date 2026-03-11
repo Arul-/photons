@@ -175,7 +175,7 @@ export default class Claw extends Photon {
   /**
    * Show latest health check result.
    * @readOnly
-   * @format table
+   * @format json
    */
   async health(): Promise<{
     ok: boolean;
@@ -203,7 +203,7 @@ export default class Claw extends Photon {
   /**
    * Show pipeline status.
    * @readOnly
-   * @format table
+   * @format json
    */
   async status(): Promise<{
     running: boolean;

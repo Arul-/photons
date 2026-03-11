@@ -186,7 +186,7 @@ export default class WhatsApp extends Photon {
   /**
    * Return the current connection status.
    * @readOnly
-   * @format table
+   * @format json
    */
   async status(): Promise<{
     status: 'connected' | 'disconnected' | 'qr_pending';
