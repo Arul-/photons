@@ -21,16 +21,22 @@ import { Photon } from '@portel/photon-core';
 export default class AgentRunner extends Photon {
   private activeRuns = new Map<string, RunState>();
   private queue: QueuedRun[] = [];
-  private maxConcurrent = 3;
   private baseDir = '';
 
-  async onInitialize(): Promise<void> {
-    this.baseDir = process.env.AGENT_RUNNER_BASE_DIR
-      || path.join(os.homedir(), 'Projects');
-    fs.mkdirSync(this.baseDir, { recursive: true });
+  protected settings = {
+    /** Base directory for group folders. Each group gets a subfolder here. */
+    baseDir: path.join(os.homedir(), 'Projects'),
+    /** Maximum concurrent agent runs */
+    maxConcurrent: 3,
+    /** Comma-separated list of tools Claude is allowed to use */
+    allowedTools: 'WebSearch,WebFetch',
+    /** Claude model to use (e.g. sonnet, opus, haiku) */
+    model: '',
+  };
 
-    const saved = await this.memory.get<number>('maxConcurrent');
-    if (saved) this.maxConcurrent = saved;
+  async onInitialize(): Promise<void> {
+    this.baseDir = this.settings.baseDir;
+    fs.mkdirSync(this.baseDir, { recursive: true });
   }
 
   /**
@@ -55,7 +61,7 @@ export default class AgentRunner extends Photon {
     const groupDir = this._ensureGroupDir(groupFolder);
 
     // If at capacity, queue it
-    if (this.activeRuns.size >= this.maxConcurrent) {
+    if (this.activeRuns.size >= this.settings.maxConcurrent) {
       return new Promise((resolve, reject) => {
         this.queue.push({ params, resolve, reject });
         this.emit({
@@ -87,7 +93,7 @@ export default class AgentRunner extends Photon {
         pid: state.proc?.pid ?? null,
       })),
       queued: this.queue.length,
-      maxConcurrent: this.maxConcurrent,
+      maxConcurrent: this.settings.maxConcurrent,
     };
   }
 
@@ -115,11 +121,9 @@ export default class AgentRunner extends Photon {
    * @param max Maximum concurrent runs {@example 5}
    */
   async concurrency(params: { max: number }): Promise<{ maxConcurrent: number }> {
-    this.maxConcurrent = Math.max(1, params.max);
-    await this.memory.set('maxConcurrent', this.maxConcurrent);
-    // Drain queue if we now have capacity
+    this.settings.maxConcurrent = Math.max(1, params.max);
     this._drainQueue();
-    return { maxConcurrent: this.maxConcurrent };
+    return { maxConcurrent: this.settings.maxConcurrent };
   }
 
   /**
@@ -257,7 +261,13 @@ export default class AgentRunner extends Photon {
         fullPrompt = `${systemPrompt}\n\n---\n\n${prompt}`;
       }
 
-      const args = ['-p', fullPrompt, '--output-format', 'json', '--allowedTools', 'WebSearch,WebFetch'];
+      const args = ['-p', fullPrompt, '--output-format', 'json'];
+      if (this.settings.allowedTools) {
+        args.push('--allowedTools', this.settings.allowedTools);
+      }
+      if (this.settings.model) {
+        args.push('--model', this.settings.model);
+      }
       if (sessionId) {
         args.push('--resume', sessionId);
       }
@@ -339,7 +349,7 @@ export default class AgentRunner extends Photon {
   }
 
   private _drainQueue(): void {
-    while (this.queue.length > 0 && this.activeRuns.size < this.maxConcurrent) {
+    while (this.queue.length > 0 && this.activeRuns.size < this.settings.maxConcurrent) {
       const next = this.queue.shift()!;
       const { params, resolve, reject } = next;
       const groupDir = this._ensureGroupDir(params.groupFolder);
