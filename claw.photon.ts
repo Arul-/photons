@@ -19,9 +19,15 @@ import { Photon } from '@portel/photon-core';
 export default class Claw extends Photon {
   private running = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
-  private pollIntervalMs = 2000;
   private processing = false;
   private sessionMap: Record<string, string> = {}; // groupFolder → sessionId
+
+  protected settings = {
+    /** Message polling interval in milliseconds */
+    pollIntervalMs: 2000,
+    /** Auto-resume pipeline after daemon restart */
+    autoResume: true,
+  };
 
   async onInitialize(): Promise<void> {
     const saved = await this.memory.get<Record<string, string>>('sessionMap');
@@ -30,7 +36,7 @@ export default class Claw extends Photon {
     // Auto-resume if pipeline was running before daemon restart.
     // Wait briefly for WhatsApp to auto-connect from saved credentials.
     const wasRunning = await this.memory.get<boolean>('running');
-    if (wasRunning) {
+    if (wasRunning && this.settings.autoResume) {
       const tryResume = async (attempts = 0): Promise<void> => {
         try {
           await this.start();
@@ -93,7 +99,7 @@ export default class Claw extends Photon {
       this._pollMessages().catch((err) => {
         this.emit({ type: 'poll_error', error: err.message });
       });
-    }, this.pollIntervalMs);
+    }, this.settings.pollIntervalMs);
 
     this.emit({ type: 'started', phone: waStatus.phone, groups: groups.length });
     return {
