@@ -6,6 +6,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@portel/photon-core": "file:../photon-core"
+    "@portel/photon-core": "file:../photon-core",
+    "better-sqlite3": "^12.6.2"
   }
 }

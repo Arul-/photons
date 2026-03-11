@@ -25,6 +25,24 @@ export default class MessageRouter extends Photon {
   async onInitialize(): Promise<void> {
     const saved = await this.memory.get<Record<string, RegisteredGroup>>('registry');
     if (saved) this.registry = saved;
+
+    // Load imported message history (from nanoclaw-import)
+    const history = await this.memory.get<Record<string, any[]>>('messageHistory');
+    if (history) {
+      for (const [jid, messages] of Object.entries(history)) {
+        const group = this.registry[jid];
+        if (!group) continue;
+        this.messageLog[group.folder] = messages.map(m => ({
+          id: `imported-${m.timestamp}`,
+          jid,
+          sender: m.from,
+          senderName: m.pushName || m.from,
+          content: m.text,
+          timestamp: new Date(m.timestamp * 1000).toISOString(),
+          fromMe: m.fromMe,
+        }));
+      }
+    }
   }
 
   /**
@@ -74,24 +92,34 @@ export default class MessageRouter extends Photon {
    * Route an inbound message. Checks if the chat is registered and whether
    * the trigger pattern matches. Emits { type: 'routed' } or { type: 'ignored' }.
    * @param jid Chat JID the message came from
-   * @param message Inbound message object
+   * @param from Sender identifier
+   * @param text Message text content
+   * @param fromMe Whether the message was sent by the bot
+   * @param pushName Sender display name
+   * @param timestamp Unix timestamp of the message
    * @format json
    */
   async route(params: {
     jid: string;
-    message: {
-      id: string;
-      sender: string;
-      senderName: string;
-      content: string;
-      timestamp: string;
-      fromMe?: boolean;
-    };
+    from: string;
+    text: string;
+    fromMe?: boolean;
+    pushName?: string;
+    timestamp: number;
   }): Promise<RoutingDecision> {
-    const { jid, message } = params;
+    const { jid, from, text, fromMe, pushName, timestamp } = params;
+    const message: MessageEntry = {
+      id: `${from}-${timestamp}`,
+      jid,
+      sender: from,
+      senderName: pushName || from,
+      content: text,
+      timestamp: new Date(timestamp * 1000).toISOString(),
+      fromMe,
+    };
 
     // Skip own messages
-    if (message.fromMe) {
+    if (fromMe) {
       return this._ignore(jid, message, 'from_self');
     }
 
@@ -103,7 +131,7 @@ export default class MessageRouter extends Photon {
     // Check trigger pattern
     if (group.requiresTrigger) {
       const trigger = new RegExp(group.trigger, 'i');
-      if (!trigger.test(message.content)) {
+      if (!trigger.test(text)) {
         return this._ignore(jid, message, 'no_trigger');
       }
     }
@@ -111,7 +139,7 @@ export default class MessageRouter extends Photon {
     // Log the message
     if (!this.messageLog[group.folder]) this.messageLog[group.folder] = [];
     const log = this.messageLog[group.folder];
-    log.push({ ...message, jid });
+    log.push(message);
     if (log.length > this.MAX_LOG) log.splice(0, log.length - this.MAX_LOG);
 
     const decision: RoutingDecision = {
