@@ -1,25 +1,23 @@
 import { Photon } from '@portel/photon-core';
 
 /**
- * Nanoclaw — orchestrates WhatsApp ↔ Claude agent pipeline.
+ * Claw — orchestrates WhatsApp ↔ Claude agent pipeline.
  *
  * Wires four photons together:
  *   whatsapp-bridge → message-router → agent-runner → whatsapp-bridge
  *                                          ↑
  *                     group-scheduler ─────┘
  *
- * Replaces the monolithic nanoclaw Node.js app with composable photons.
- *
  * @version 1.0.0
  * @icon 🦞
- * @tags orchestrator, whatsapp, agent, nanoclaw
+ * @tags orchestrator, whatsapp, agent, claw
  * @stateful
  * @photon bridge ./whatsapp-bridge.photon.ts
  * @photon router ./message-router.photon.ts
  * @photon runner ./agent-runner.photon.ts
  * @photon scheduler ./group-scheduler.photon.ts
  */
-export default class Nanoclaw extends Photon {
+export default class Claw extends Photon {
   private bridge: any;
   private router: any;
   private runner: any;

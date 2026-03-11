@@ -1,4 +1,4 @@
-# Nanoclaw
+# Claw
 
 Orchestrates the full WhatsApp ↔ Claude agent pipeline by wiring four photons together.
 
@@ -27,17 +27,17 @@ whatsapp-bridge  →  message-router  →  agent-runner  →  whatsapp-bridge
 
 ```bash
 # Start the pipeline
-photon cli nanoclaw start
+photon cli claw start
 
 # Register a group
-photon cli nanoclaw register \
+photon cli claw register \
   --jid "123@g.us" \
   --name "Dev Team" \
   --folder "dev-team" \
   --trigger "@bot"
 
 # Schedule a daily standup
-photon cli nanoclaw schedule \
+photon cli claw schedule \
   --groupFolder "dev-team" \
   --chatJid "123@g.us" \
   --prompt "Summarise yesterday's discussion and list open action items" \
@@ -45,7 +45,7 @@ photon cli nanoclaw schedule \
   --name "daily-standup"
 
 # Check status
-photon cli nanoclaw status
+photon cli claw status
 ```
 
 ## Programmatic Usage
@@ -53,7 +53,7 @@ photon cli nanoclaw status
 ```typescript
 import { photon } from '@portel/photon-core';
 
-const claw = await photon('./nanoclaw.photon.ts', {
+const claw = await photon('./claw.photon.ts', {
   onEvent: (event) => console.log(event),
 });
 
@@ -78,19 +78,19 @@ await claw.register({ jid: '123@g.us', name: 'Dev Team', folder: 'dev-team', tri
 
 The orchestrator tracks Claude session IDs per group folder. When a message arrives, the previous session is resumed via `--resume sessionId`, giving Claude conversational continuity within each group. Session IDs persist across restarts via `this.memory`.
 
-## Migrating from Nanoclaw
+## Migrating from Claw
 
-If you're switching from the original nanoclaw system, run the import script to bring over all your data:
+If you're switching from the original claw system, run the import script to bring over all your data:
 
 ```bash
 # Preview what will be imported
-tsx nanoclaw-import.ts --dry-run
+tsx claw-import.ts --dry-run
 
 # Run the import
-tsx nanoclaw-import.ts
+tsx claw-import.ts
 
-# Or specify a custom nanoclaw directory
-tsx nanoclaw-import.ts --nanoclaw-dir /path/to/nanoclaw
+# Or specify a custom claw directory
+tsx claw-import.ts --claw-dir /path/to/claw
 ```
 
 The import script transfers:
@@ -101,7 +101,7 @@ The import script transfers:
 - **Message history** — last 50 messages per chat for context
 - **Scheduled tasks** — active cron tasks
 
-After importing, just `photon cli nanoclaw start` — no QR scan needed, all groups ready.
+After importing, just `photon cli claw start` — no QR scan needed, all groups ready.
 
 ## Dependencies
 

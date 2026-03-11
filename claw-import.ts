@@ -1,13 +1,13 @@
 #!/usr/bin/env tsx
 /**
- * Imports nanoclaw data into the photon-based nanoclaw system.
+ * Imports nanoclaw data into the Claw photon system.
  *
  * Reads from nanoclaw's SQLite database and file system, then writes
- * into the photon memory/state directories so the new system starts
+ * into the photon memory/state directories so Claw starts
  * with all existing groups, sessions, auth, and message history.
  *
  * Usage:
- *   tsx nanoclaw-import.ts [--nanoclaw-dir /path/to/nanoclaw] [--dry-run]
+ *   tsx claw-import.ts [--nanoclaw-dir /path/to/nanoclaw] [--dry-run]
  */
 
 import Database from 'better-sqlite3';
@@ -63,7 +63,7 @@ function copyDir(src: string, dest: string) {
 
 // ─── Validate ──────────────────────────────────────────────────
 
-console.log(`\nNanoclaw Import Tool`);
+console.log(`\nClaw Import Tool (from nanoclaw)`);
 console.log(`====================`);
 console.log(`Source:  ${NANOCLAW_DIR}`);
 console.log(`Target:  ${PHOTON_HOME}`);
@@ -162,7 +162,7 @@ log(`  Imported ${rows.length} groups`);
 
 // ─── 3. Import Sessions → nanoclaw orchestrator sessionMap ────
 
-console.log('\n3. Sessions → nanoclaw orchestrator');
+console.log('\n3. Sessions → claw orchestrator');
 const sessions = db.prepare('SELECT * FROM sessions').all() as any[];
 const sessionMap: Record<string, string> = {};
 
@@ -171,8 +171,8 @@ for (const s of sessions) {
   log(`  Session: ${s.group_folder} → ${s.session_id}`);
 }
 
-const nanoclawMemoryDir = path.join(MEMORY_DIR, 'nanoclaw', 'default');
-writeJson(path.join(nanoclawMemoryDir, 'sessionMap.json'), sessionMap);
+const clawMemoryDir = path.join(MEMORY_DIR, 'claw', 'default');
+writeJson(path.join(clawMemoryDir, 'sessionMap.json'), sessionMap);
 log(`  Imported ${sessions.length} sessions`);
 
 // ─── 4. Copy Group Folders → agent-runner groups ──────────────
@@ -295,6 +295,6 @@ console.log(`  Group dirs: ${fs.existsSync(GROUPS_DIR) ? fs.readdirSync(GROUPS_D
 if (dryRun) {
   console.log('\n  This was a dry run. Re-run without --dry-run to apply.');
 } else {
-  console.log('\n  Import complete! Start with: photon cli nanoclaw start');
+  console.log('\n  Import complete! Start with: photon cli claw start');
 }
 console.log();
