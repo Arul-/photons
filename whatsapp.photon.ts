@@ -39,7 +39,12 @@ export default class WhatsApp extends Photon {
   private knownGroups: Record<string, string> = {}; // jid → name
   private _lastQR: string | null = null;
   private _pendingMessages: Array<{ chatJid: string; message: InboundMessage }> = [];
-  private _eventListeners: Map<string, Set<(data: any) => void>> = new Map();
+  private _eventListeners: Array<{
+    event: string;
+    fn: (data: any) => void;
+    filter?: { group?: string; jid?: string; trigger?: string; fromMe?: boolean };
+    resolvedJid?: string; // cached JID from group name lookup
+  }> = [];
 
   private get authDir(): string {
     const base = process.env.PHOTON_WHATSAPP_AUTHDIR
@@ -60,7 +65,7 @@ export default class WhatsApp extends Photon {
         this.knownGroups = old.knownGroups || {};
         this.outgoingQueue = old.outgoingQueue || [];
         this._pendingMessages = old._pendingMessages || [];
-        this._eventListeners = old._eventListeners || new Map();
+        this._eventListeners = old._eventListeners || [];
         this._lastQR = old._lastQR || null;
         this.reconnectAttempts = 0;
 
@@ -271,13 +276,32 @@ export default class WhatsApp extends Photon {
   }
 
   /**
-   * Subscribe to events. Same pattern as EventEmitter.
+   * Subscribe to events with optional filtering.
    * @internal
+   *
+   * @example
+   * // All messages
+   * whatsapp.on('message', handler)
+   *
+   * // Specific group by name (fuzzy match) with trigger
+   * whatsapp.on('message', handler, { group: 'Arul and Lura', trigger: '@' })
+   *
+   * // By JID directly
+   * whatsapp.on('message', handler, { jid: '120363406704631066@g.us' })
    */
-  on(event: string, fn: (data: any) => void): void {
-    let listeners = this._eventListeners.get(event);
-    if (!listeners) { listeners = new Set(); this._eventListeners.set(event, listeners); }
-    listeners.add(fn);
+  on(event: string, fn: (data: any) => void, filter?: { group?: string; jid?: string; trigger?: string; fromMe?: boolean }): void {
+    const entry: typeof this._eventListeners[0] = { event, fn, filter };
+
+    // Resolve group name → JID eagerly if groups are already known
+    if (filter?.group) {
+      const query = filter.group.toLowerCase();
+      const jid = Object.entries(this.knownGroups).find(
+        ([, name]) => name.toLowerCase().includes(query)
+      )?.[0];
+      if (jid) entry.resolvedJid = jid;
+    }
+
+    this._eventListeners.push(entry);
   }
 
   /**
@@ -285,7 +309,8 @@ export default class WhatsApp extends Photon {
    * @internal
    */
   off(event: string, fn: (data: any) => void): void {
-    this._eventListeners.get(event)?.delete(fn);
+    const idx = this._eventListeners.findIndex(e => e.event === event && e.fn === fn);
+    if (idx !== -1) this._eventListeners.splice(idx, 1);
   }
 
   /**
@@ -400,11 +425,27 @@ export default class WhatsApp extends Photon {
         }
 
         // Notify direct listeners (e.g. claw via this.whatsapp.on('message', ...))
-        const listeners = this._eventListeners.get('message');
-        if (listeners) {
-          for (const fn of listeners) {
-            try { fn({ chatJid, message: inbound }); } catch { /* best-effort */ }
+        for (const entry of this._eventListeners) {
+          if (entry.event !== 'message') continue;
+          const f = entry.filter;
+          if (f) {
+            // JID filter (direct or resolved from group name)
+            if (f.jid && f.jid !== chatJid) continue;
+            if (f.group) {
+              // Lazy-resolve group name if not yet resolved
+              if (!entry.resolvedJid) {
+                const query = f.group.toLowerCase();
+                const jid = Object.entries(this.knownGroups).find(
+                  ([, name]) => name.toLowerCase().includes(query)
+                )?.[0];
+                if (jid) entry.resolvedJid = jid;
+              }
+              if (entry.resolvedJid && entry.resolvedJid !== chatJid) continue;
+            }
+            if (f.trigger && !content.includes(f.trigger)) continue;
+            if (f.fromMe !== undefined && f.fromMe !== fromMe) continue;
           }
+          try { entry.fn({ chatJid, message: inbound }); } catch { /* best-effort */ }
         }
 
         // Emit on channel — framework auto-prefixes with photon name ('whatsapp:messages')
