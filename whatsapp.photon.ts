@@ -75,7 +75,6 @@ export default class WhatsApp extends Photon {
 
   async onInitialize(ctx?: { reason?: string; oldInstance?: any }): Promise<void> {
     fs.mkdirSync(MEDIA_DIR, { recursive: true });
-    fs.mkdirSync(this.authDir, { recursive: true });
     // Hot-reload: take over the socket from the old instance instead of reconnecting.
     // This avoids destroying the WhatsApp session (which could trigger 440 bans).
     if (ctx?.reason === 'hot-reload' && ctx.oldInstance) {
