@@ -386,7 +386,10 @@ export default class Claw extends Photon {
 
   private async _handleMessage(group: RegisteredGroup, event: {
     chatJid: string;
-    message: { sender: string; senderName: string; content: string; fromMe: boolean; timestamp: string };
+    message: {
+      sender: string; senderName: string; content: string; fromMe: boolean; timestamp: string;
+      type?: string; filePath?: string; media?: { mimetype?: string; caption?: string };
+    };
   }): Promise<void> {
     const msg = event.message;
 
@@ -405,14 +408,15 @@ export default class Claw extends Photon {
     log.push(entry);
     if (log.length > this.MAX_LOG) log.splice(0, log.length - this.MAX_LOG);
 
-    // Build context from recent messages
-    const context = this._formatContext(log.slice(-20));
+    // Build context from recent messages (include media metadata)
+    const context = this._formatContext(log.slice(-20), msg);
 
     this.emit({
       type: 'routing',
       jid: event.chatJid,
       folder: group.folder,
       textPreview: msg.content.slice(0, 80),
+      messageType: msg.type || 'text',
     });
 
     // Quick ACK so the user knows the message was received (not part of agent context)
@@ -426,6 +430,13 @@ export default class Claw extends Photon {
       this.whatsapp.typing({ jid: event.chatJid, typing: true }).catch(() => {});
     }, 20_000);
 
+    // If incoming message has a media file, make it accessible to the agent
+    const addDirs: string[] = [];
+    if (msg.filePath) {
+      const mediaDir = msg.filePath.substring(0, msg.filePath.lastIndexOf('/'));
+      addDirs.push(mediaDir);
+    }
+
     let result: any;
     try {
       result = await this.runner.run({
@@ -433,6 +444,7 @@ export default class Claw extends Photon {
         prompt: context,
         chatJid: event.chatJid,
         sessionId: this.sessionMap[group.folder],
+        ...(addDirs.length > 0 ? { addDirs } : {}),
       });
     } finally {
       clearInterval(typingInterval);
@@ -445,24 +457,104 @@ export default class Claw extends Photon {
     }
 
     if (result.status === 'success' && result.output) {
-      await this.whatsapp.send({ jid: event.chatJid, text: result.output });
-      this.emit({
-        type: 'replied',
-        jid: event.chatJid,
-        folder: group.folder,
-        duration: result.duration,
-        outputLength: result.output.length,
-      });
+      await this._sendAgentResponse(event.chatJid, result.output, group.folder, result.duration);
     } else if (result.error) {
       this.emit({ type: 'error', source: 'agent-runner', folder: group.folder, error: result.error });
     }
   }
 
-  private _formatContext(messages: MessageEntry[]): string {
+  /** Send agent response, detecting and sending media files inline */
+  private async _sendAgentResponse(jid: string, output: string, folder: string, duration: number): Promise<void> {
+    // Detect media file references in the output:
+    // Patterns: ![alt](path) or bare file paths ending in image/video extensions
+    const mediaPattern = /!\[([^\]]*)\]\(([^)]+)\)/g;
+    const filePathPattern = /(?:^|\s)(\/[^\s]+\.(?:jpg|jpeg|png|gif|webp|mp4|pdf|mp3|ogg|m4a))/gi;
+
+    let textOutput = output;
+    const mediaFiles: Array<{ path: string; caption: string; type: 'image' | 'video' | 'audio' | 'document' }> = [];
+
+    // Extract markdown image references
+    let match: RegExpExecArray | null;
+    while ((match = mediaPattern.exec(output)) !== null) {
+      const [fullMatch, alt, filePath] = match;
+      const type = this._detectMediaType(filePath);
+      if (type) {
+        mediaFiles.push({ path: filePath, caption: alt, type });
+        textOutput = textOutput.replace(fullMatch, '').trim();
+      }
+    }
+
+    // Extract bare file paths (only if no markdown images found)
+    if (mediaFiles.length === 0) {
+      while ((match = filePathPattern.exec(output)) !== null) {
+        const filePath = match[1];
+        const type = this._detectMediaType(filePath);
+        if (type) {
+          mediaFiles.push({ path: filePath, caption: '', type });
+          textOutput = textOutput.replace(filePath, '').trim();
+        }
+      }
+    }
+
+    // Send text portion first (if any remains after extracting media refs)
+    if (textOutput.trim()) {
+      await this.whatsapp.send({ jid, text: textOutput.trim() });
+    }
+
+    // Send each media file
+    for (const media of mediaFiles) {
+      try {
+        await this.whatsapp.media({
+          jid,
+          url: media.path,
+          type: media.type,
+          caption: media.caption || undefined,
+        });
+      } catch (err: any) {
+        this.emit({ type: 'error', source: 'media_send', folder, error: err.message, path: media.path });
+        // Fallback: send the path as text so the user knows something was generated
+        await this.whatsapp.send({ jid, text: `[Media file: ${media.path}]` }).catch(() => {});
+      }
+    }
+
+    this.emit({
+      type: 'replied',
+      jid,
+      folder,
+      duration,
+      outputLength: output.length,
+      mediaCount: mediaFiles.length,
+    });
+  }
+
+  private _detectMediaType(filePath: string): 'image' | 'video' | 'audio' | 'document' | null {
+    const ext = filePath.split('.').pop()?.toLowerCase();
+    if (!ext) return null;
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) return 'image';
+    if (['mp4', 'mov', 'avi'].includes(ext)) return 'video';
+    if (['mp3', 'ogg', 'm4a', 'wav'].includes(ext)) return 'audio';
+    if (['pdf', 'doc', 'docx', 'xls', 'xlsx'].includes(ext)) return 'document';
+    return null;
+  }
+
+  private _formatContext(messages: MessageEntry[], currentMsg?: {
+    type?: string; filePath?: string; media?: { mimetype?: string; caption?: string };
+  }): string {
     const lines = messages.map(m =>
       `<message sender="${this._esc(m.sender)}" time="${m.timestamp}">${this._esc(m.content)}</message>`
     );
-    return `<messages>\n${lines.join('\n')}\n</messages>`;
+
+    let context = `<messages>\n${lines.join('\n')}\n</messages>`;
+
+    // Append media context for the current message if it has a file
+    if (currentMsg?.filePath && currentMsg?.type && currentMsg.type !== 'text') {
+      context += `\n\n<attached-media type="${currentMsg.type}" path="${this._esc(currentMsg.filePath)}"`;
+      if (currentMsg.media?.mimetype) context += ` mimetype="${this._esc(currentMsg.media.mimetype)}"`;
+      if (currentMsg.media?.caption) context += ` caption="${this._esc(currentMsg.media.caption)}"`;
+      context += ` />\n<instruction>The user sent a ${currentMsg.type} file. You can read it at the path above using the Read tool. If it's an image, you can view it directly. Respond to the media content.</instruction>`;
+    }
+
+    return context;
   }
 
   private _esc(s: string): string {

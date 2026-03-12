@@ -6,6 +6,7 @@ import pino from 'pino';
 import makeWASocket, {
   Browsers,
   DisconnectReason,
+  downloadMediaMessage,
   fetchLatestBaileysVersion,
   WASocket,
   makeCacheableSignalKeyStore,
@@ -18,6 +19,10 @@ const logger = pino({ level: process.env.PHOTON_WA_DEBUG ? 'debug' : 'silent' })
 
 /** Max age for queued messages before they're dropped on flush (1 hour) */
 const MESSAGE_TTL_MS = 60 * 60 * 1000;
+
+/** Directory for downloaded media files */
+const MEDIA_DIR = path.join(os.homedir(), '.photon', 'whatsapp', 'media');
+fs.mkdirSync(MEDIA_DIR, { recursive: true });
 
 /**
  * WhatsApp — live WhatsApp connection via Baileys.
@@ -547,6 +552,37 @@ export default class WhatsApp extends Photon {
     }
   }
 
+  /** Download media from a Baileys message and attach the file path to the InboundMessage */
+  private async _downloadMedia(msg: any, inbound: InboundMessage): Promise<void> {
+    const ext = this._mimeToExt(inbound.media?.mimetype || '');
+    const filename = `${inbound.messageId}${ext}`;
+    const filePath = path.join(MEDIA_DIR, filename);
+
+    // Skip if already downloaded (e.g. from a retry)
+    if (fs.existsSync(filePath)) {
+      inbound.filePath = filePath;
+      return;
+    }
+
+    const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
+      logger,
+      reuploadRequest: this.sock!.updateMediaMessage,
+    });
+
+    fs.writeFileSync(filePath, buffer);
+    inbound.filePath = filePath;
+  }
+
+  /** Map common MIME types to file extensions */
+  private _mimeToExt(mime: string): string {
+    const map: Record<string, string> = {
+      'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif',
+      'video/mp4': '.mp4', 'audio/ogg': '.ogg', 'audio/mpeg': '.mp3', 'audio/mp4': '.m4a',
+      'application/pdf': '.pdf', 'application/octet-stream': '.bin',
+    };
+    return map[mime] || `.${mime.split('/')[1] || 'bin'}`;
+  }
+
   private _wireSocketEvents(saveCreds: () => Promise<void>): void {
     if (!this.sock) return;
 
@@ -633,6 +669,13 @@ export default class WhatsApp extends Photon {
         const inbound = this._extractMessage(msg.message, {
           messageId, chatJid, sender, senderName, timestamp, fromMe,
         });
+
+        // Download media for supported types (non-blocking — attach path when ready)
+        if (inbound.media && ['image', 'video', 'audio', 'document', 'sticker'].includes(inbound.type)) {
+          this._downloadMedia(msg, inbound).catch((err: any) => {
+            this.emit({ type: 'error', source: 'media_download', error: err.message });
+          });
+        }
 
         // Buffer for polling via pending()
         this._pendingMessages.push({ chatJid, message: inbound });
@@ -886,4 +929,5 @@ interface InboundMessage {
   reaction?: { emoji: string; targetMessageId: string };
   location?: { lat: number; lng: number; name?: string };
   quotedMessage?: { id: string; content: string; sender: string };
+  filePath?: string;
 }

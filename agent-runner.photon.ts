@@ -49,6 +49,7 @@ export default class AgentRunner extends Photon {
    * @param chatJid Chat JID for result routing (passed through in events)
    * @param sessionId Optional session ID for conversation continuity
    * @param systemPrompt Optional extra system context prepended to the group's CLAUDE.md
+   * @param addDirs Additional directories Claude can access (e.g. media download dirs)
    */
   async run(params: {
     groupFolder: string;
@@ -56,6 +57,7 @@ export default class AgentRunner extends Photon {
     chatJid?: string;
     sessionId?: string;
     systemPrompt?: string;
+    addDirs?: string[];
   }): Promise<RunResult> {
     const { groupFolder, prompt, chatJid, sessionId, systemPrompt } = params;
 
@@ -75,7 +77,7 @@ export default class AgentRunner extends Photon {
       });
     }
 
-    return this._execute(groupDir, groupFolder, prompt, chatJid, sessionId, systemPrompt);
+    return this._execute(groupDir, groupFolder, prompt, chatJid, sessionId, systemPrompt, params.addDirs);
   }
 
   /**
@@ -188,6 +190,7 @@ export default class AgentRunner extends Photon {
     chatJid?: string,
     sessionId?: string,
     systemPrompt?: string,
+    addDirs?: string[],
   ): Promise<RunResult> {
     const startedAt = new Date().toISOString();
     const runState: RunState = { proc: null, startedAt };
@@ -201,11 +204,11 @@ export default class AgentRunner extends Photon {
     });
 
     try {
-      let result = await this._spawnClaude(groupDir, groupFolder, prompt, sessionId, systemPrompt, runState);
+      let result = await this._spawnClaude(groupDir, groupFolder, prompt, sessionId, systemPrompt, runState, addDirs);
 
       // If resume failed (stale session), retry without session ID
       if (result.status === 'error' && sessionId && result.error?.includes('No conversation found')) {
-        result = await this._spawnClaude(groupDir, groupFolder, prompt, undefined, systemPrompt, runState);
+        result = await this._spawnClaude(groupDir, groupFolder, prompt, undefined, systemPrompt, runState, addDirs);
       }
 
       // Log the run
@@ -258,6 +261,7 @@ export default class AgentRunner extends Photon {
     sessionId?: string,
     systemPrompt?: string,
     runState?: RunState,
+    addDirs?: string[],
   ): Promise<RunResult> {
     return new Promise((resolve) => {
       const startTime = Date.now();
@@ -280,6 +284,12 @@ export default class AgentRunner extends Photon {
       }
       if (this.settings.addDirs) {
         for (const dir of this.settings.addDirs.split(',').map(d => d.trim()).filter(Boolean)) {
+          args.push('--add-dir', dir);
+        }
+      }
+      // Per-run additional directories (e.g. media download dirs)
+      if (addDirs) {
+        for (const dir of addDirs) {
           args.push('--add-dir', dir);
         }
       }
@@ -375,6 +385,7 @@ export default class AgentRunner extends Photon {
         params.chatJid,
         params.sessionId,
         params.systemPrompt,
+        params.addDirs,
       ).then(resolve).catch(reject);
     }
   }
@@ -394,6 +405,7 @@ interface QueuedRun {
     chatJid?: string;
     sessionId?: string;
     systemPrompt?: string;
+    addDirs?: string[];
   };
   resolve: (result: RunResult) => void;
   reject: (err: Error) => void;
