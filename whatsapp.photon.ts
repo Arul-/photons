@@ -540,6 +540,14 @@ export default class WhatsApp extends Photon {
       if (jid) entry.resolvedJid = jid;
     }
 
+    // If a JID-filtered listener for this event already exists, replace it.
+    // This prevents stale handlers accumulating across claw restarts where the
+    // new instance has no reference to the old handler functions.
+    if (filter?.jid) {
+      const idx = this._eventListeners.findIndex(e => e.event === event && e.filter?.jid === filter.jid);
+      if (idx !== -1) this._eventListeners.splice(idx, 1);
+    }
+
     this._eventListeners.push(entry);
   }
 
