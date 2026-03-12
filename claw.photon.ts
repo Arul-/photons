@@ -439,11 +439,6 @@ export default class Claw extends Photon {
       messageType: msg.type || 'text',
     });
 
-    // Quick ACK so the user knows the message was received (not part of agent context)
-    const acks = ['Noted, on it.', 'Got it, thinking...', 'On it.', 'Noted.', 'Working on it...'];
-    const ack = acks[Math.floor(Math.random() * acks.length)];
-    await this.whatsapp.send({ jid: event.chatJid, text: ack }).catch(() => {});
-
     // Keep typing indicator alive during agent processing (WhatsApp expires it after ~25s)
     await this.whatsapp.typing({ jid: event.chatJid, typing: true }).catch(() => {});
     const typingInterval = setInterval(() => {
