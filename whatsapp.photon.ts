@@ -260,7 +260,7 @@ export default class WhatsApp extends Photon {
    * @param jid WhatsApp JID — group (@g.us) or contact (@s.whatsapp.net) {@example "12345678901@s.whatsapp.net"}
    * @param text Message text to send
    */
-  async send(params: { jid: string; text: string }): Promise<{ queued: boolean }> {
+  async send(params: { jid: string; text: string }): Promise<{ queued: boolean; key?: MessageKey }> {
     const { jid } = params;
     const text = markdownToWa(params.text);
 
@@ -270,13 +270,31 @@ export default class WhatsApp extends Photon {
     }
 
     try {
-      await this.sock.sendMessage(jid, { text });
-      return { queued: false };
+      const sent = await this.sock.sendMessage(jid, { text });
+      return { queued: false, key: sent?.key as MessageKey };
     } catch (err: any) {
       this.emit({ type: 'error', source: 'send', error: err.message });
       this.outgoingQueue.push({ jid, text, queuedAt: Date.now() });
       return { queued: true };
     }
+  }
+
+  /**
+   * Edit a previously sent message.
+   * Only works on messages sent by this bot.
+   *
+   * @title Edit Message
+   * @openWorld
+   * @param jid WhatsApp JID of the chat
+   * @param key Message key returned from send()
+   * @param text New message text
+   */
+  async edit(params: { jid: string; key: MessageKey; text: string }): Promise<void> {
+    if (!this.connected || !this.sock) {
+      throw new Error('Not connected. Call connect() first.');
+    }
+    const text = markdownToWa(params.text);
+    await this.sock.sendMessage(params.jid, { text, edit: params.key });
   }
 
   /**
@@ -951,6 +969,12 @@ export default class WhatsApp extends Photon {
 }
 
 // ─── Types ─────────────────────────────────────────────────────────
+
+interface MessageKey {
+  remoteJid?: string | null;
+  fromMe?: boolean | null;
+  id?: string | null;
+}
 
 interface InboundMessage {
   messageId: string;

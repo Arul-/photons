@@ -439,9 +439,11 @@ export default class Claw extends Photon {
       messageType: msg.type || 'text',
     });
 
-    // Quick ACK so the user knows the message was received
+    // Quick ACK so the user knows the message was received.
+    // We capture the key so we can edit it in-place with the final response.
     const acks = ['Noted, on it.', 'Got it, thinking...', 'On it.', 'Noted.', 'Working on it...'];
-    await this.whatsapp.send({ jid: event.chatJid, text: acks[Math.floor(Math.random() * acks.length)] }).catch(() => {});
+    const ackResult = await this.whatsapp.send({ jid: event.chatJid, text: acks[Math.floor(Math.random() * acks.length)] }).catch(() => null);
+    const ackKey = ackResult?.key ?? null;
 
     // Keep typing indicator alive during agent processing (WhatsApp expires it after ~25s)
     await this.whatsapp.typing({ jid: event.chatJid, typing: true }).catch(() => {});
@@ -476,14 +478,14 @@ export default class Claw extends Photon {
     }
 
     if (result.status === 'success' && result.output) {
-      await this._sendAgentResponse(event.chatJid, result.output, group.folder, result.duration);
+      await this._sendAgentResponse(event.chatJid, result.output, group.folder, result.duration, ackKey);
     } else if (result.error) {
       this.emit({ type: 'error', source: 'agent-runner', folder: group.folder, error: result.error });
     }
   }
 
-  /** Send agent response, detecting and sending media files inline */
-  private async _sendAgentResponse(jid: string, output: string, folder: string, duration: number): Promise<void> {
+  /** Send agent response, editing the ACK message in-place if possible */
+  private async _sendAgentResponse(jid: string, output: string, folder: string, duration: number, ackKey?: any): Promise<void> {
     // Detect media file references in the output:
     // Patterns: ![alt](path) or bare file paths ending in image/video extensions
     const mediaPattern = /!\[([^\]]*)\]\(([^)]+)\)/g;
@@ -515,9 +517,17 @@ export default class Claw extends Photon {
       }
     }
 
-    // Send text portion (WhatsApp photon auto-converts Markdown → WhatsApp formatting)
+    // Send text portion — edit the ACK in-place if we have its key, else send fresh
     if (textOutput.trim()) {
-      await this.whatsapp.send({ jid, text: textOutput.trim() });
+      if (ackKey) {
+        await this.whatsapp.edit({ jid, key: ackKey, text: textOutput.trim() }).catch(async () => {
+          // Fall back to a new message if edit fails (e.g. too old, unsupported client)
+          await this.whatsapp.send({ jid, text: textOutput.trim() });
+        });
+        ackKey = null; // consumed — media attachments below go as separate messages
+      } else {
+        await this.whatsapp.send({ jid, text: textOutput.trim() });
+      }
     }
 
     // Send each media file
