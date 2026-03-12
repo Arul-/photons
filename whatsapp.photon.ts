@@ -379,9 +379,9 @@ export default class WhatsApp extends Photon {
           this._pendingMessages.splice(0, this._pendingMessages.length - 1000);
         }
 
-        // Also emit on channel for future pub/sub consumers
+        // Emit on channel — framework auto-prefixes with photon name ('whatsapp:messages')
         this.emit({
-          channel: 'whatsapp:messages',
+          channel: 'messages',
           type: 'message',
           chatJid,
           message: inbound,
