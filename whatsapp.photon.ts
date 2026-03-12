@@ -16,6 +16,9 @@ import { Photon } from '@portel/photon-core';
 
 const logger = pino({ level: process.env.PHOTON_WA_DEBUG ? 'debug' : 'silent' });
 
+/** Max age for queued messages before they're dropped on flush (1 hour) */
+const MESSAGE_TTL_MS = 60 * 60 * 1000;
+
 /**
  * WhatsApp — live WhatsApp connection via Baileys.
  *
@@ -34,9 +37,10 @@ export default class WhatsApp extends Photon {
   private qrPending = false;
   private phoneNumber = '';
   private reconnectAttempts = 0;
-  private outgoingQueue: Array<{ jid: string; text: string }> = [];
+  private outgoingQueue: Array<{ jid: string; text: string; queuedAt: number }> = [];
   private flushing = false;
   private knownGroups: Record<string, string> = {}; // jid → name
+  private _groupNameIndex: Map<string, string> = new Map(); // lowercase name → jid (reverse index)
   private _lastQR: string | null = null;
   private _connectPromise: Promise<any> | null = null;
   private _destroyed = false;
@@ -71,6 +75,7 @@ export default class WhatsApp extends Photon {
       this._lastQR = old._lastQR || null;
       this._connectPromise = old._connectPromise || null;
       this.reconnectAttempts = old.reconnectAttempts || 0;
+      this._rebuildGroupIndex();
 
       // Mark old instance as destroyed so its stale timers don't interfere
       old._destroyed = true;
@@ -144,75 +149,75 @@ export default class WhatsApp extends Photon {
   }
 
   private async _doConnect(): Promise<any> {
+    try {
+      const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
+      const { version } = await fetchLatestBaileysVersion();
 
-    const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
-    const { version } = await fetchLatestBaileysVersion();
+      this.sock = makeWASocket({
+        version,
+        auth: {
+          creds: state.creds,
+          keys: makeCacheableSignalKeyStore(state.keys, logger),
+        },
+        printQRInTerminal: false,
+        browser: Browsers.macOS('Chrome'),
+        logger,
+      });
 
-    this.sock = makeWASocket({
-      version,
-      auth: {
-        creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, logger),
-      },
-      printQRInTerminal: false,
-      browser: Browsers.macOS('Chrome'),
-      logger,
-    });
+      // Wire persistent event handlers (messages, creds, reconnect)
+      this._wireSocketEvents(saveCreds);
 
-    // Wire persistent event handlers (messages, creds, reconnect)
-    this._wireSocketEvents(saveCreds);
+      // Wait for first meaningful event: QR, open, or close
+      const first = await new Promise<
+        { type: 'qr'; code: string } | { type: 'open' } | { type: 'error'; reason: string }
+      >((resolve) => {
+        const onUpdate = (update: any) => {
+          if (update.qr) {
+            this.sock?.ev.off('connection.update', onUpdate);
+            resolve({ type: 'qr', code: update.qr });
+          } else if (update.connection === 'open') {
+            this.sock?.ev.off('connection.update', onUpdate);
+            resolve({ type: 'open' });
+          } else if (update.connection === 'close') {
+            this.sock?.ev.off('connection.update', onUpdate);
+            const reason = (update.lastDisconnect?.error as any)?.output?.statusCode;
+            resolve({ type: 'error', reason: String(reason || 'unknown') });
+          }
+        };
+        this.sock!.ev.on('connection.update', onUpdate);
+      });
 
-    // Wait for first meaningful event: QR, open, or close
-    const first = await new Promise<
-      { type: 'qr'; code: string } | { type: 'open' } | { type: 'error'; reason: string }
-    >((resolve) => {
-      const onUpdate = (update: any) => {
-        if (update.qr) {
-          this.sock?.ev.off('connection.update', onUpdate);
-          resolve({ type: 'qr', code: update.qr });
-        } else if (update.connection === 'open') {
-          this.sock?.ev.off('connection.update', onUpdate);
-          resolve({ type: 'open' });
-        } else if (update.connection === 'close') {
-          this.sock?.ev.off('connection.update', onUpdate);
-          const reason = (update.lastDisconnect?.error as any)?.output?.statusCode;
-          resolve({ type: 'error', reason: String(reason || 'unknown') });
+      if (first.type === 'error') {
+        const code = Number(first.reason);
+        // Session invalid — clear stale credentials and retry to get a fresh QR
+        if (code === 440 || code === 401) {
+          this._clearAuth();
+          this.sock?.end(undefined);
+          this.sock = null;
+          this.emit({ type: 'session_expired', reason: code, message: 'Stale session cleared. Reconnecting for fresh QR...' });
+          // Retry once — will now get a QR since credentials are gone
+          return this.connect();
         }
-      };
-      this.sock!.ev.on('connection.update', onUpdate);
-    });
-
-    if (first.type === 'error') {
-      this._connectPromise = null;
-      const code = Number(first.reason);
-      // Session invalid — clear stale credentials and retry to get a fresh QR
-      if (code === 440 || code === 401) {
-        this._clearAuth();
-        this.sock?.end(undefined);
-        this.sock = null;
-        this.emit({ type: 'session_expired', reason: code, message: 'Stale session cleared. Reconnecting for fresh QR...' });
-        // Retry once — will now get a QR since credentials are gone
-        return this.connect();
+        throw new Error(`Connection failed: ${first.reason}`);
       }
-      throw new Error(`Connection failed: ${first.reason}`);
+
+      if (first.type === 'open') {
+        // Had saved credentials — connected immediately
+        return { status: 'connected', phone: this.phoneNumber };
+      }
+
+      // QR needed — return it immediately, connection completes async
+      // _wireSocketEvents already handles connection.open → sets connected + phone
+      this.qrPending = true;
+      this._lastQR = first.code;
+      return {
+        status: 'qr_pending',
+        qr: first.code,
+        message: 'Scan with WhatsApp → Linked Devices → Link a Device, then call status() to verify.',
+      };
+    } finally {
+      this._connectPromise = null;
     }
-
-    this._connectPromise = null;
-
-    if (first.type === 'open') {
-      // Had saved credentials — connected immediately
-      return { status: 'connected', phone: this.phoneNumber };
-    }
-
-    // QR needed — return it immediately, connection completes async
-    // _wireSocketEvents already handles connection.open → sets connected + phone
-    this.qrPending = true;
-    this._lastQR = first.code;
-    return {
-      status: 'qr_pending',
-      qr: first.code,
-      message: 'Scan with WhatsApp → Linked Devices → Link a Device, then call status() to verify.',
-    };
   }
 
   /**
@@ -236,16 +241,128 @@ export default class WhatsApp extends Photon {
     const { jid, text } = params;
 
     if (!this.connected || !this.sock) {
-      this.outgoingQueue.push({ jid, text });
+      this.outgoingQueue.push({ jid, text, queuedAt: Date.now() });
       return { queued: true };
     }
 
     try {
       await this.sock.sendMessage(jid, { text });
       return { queued: false };
-    } catch {
-      this.outgoingQueue.push({ jid, text });
+    } catch (err: any) {
+      this.emit({ type: 'error', source: 'send', error: err.message });
+      this.outgoingQueue.push({ jid, text, queuedAt: Date.now() });
       return { queued: true };
+    }
+  }
+
+  /**
+   * Reply to a specific message in a WhatsApp chat.
+   * The reply appears threaded/quoted in WhatsApp.
+   * @param jid WhatsApp JID — the chat to reply in
+   * @param text Reply text
+   * @param quotedId Message ID to reply to (from inbound message's messageId field)
+   */
+  async reply(params: { jid: string; text: string; quotedId: string }): Promise<{ sent: boolean }> {
+    if (!this.connected || !this.sock) {
+      throw new Error('Not connected. Call connect() first.');
+    }
+
+    const { jid, text, quotedId } = params;
+    try {
+      await this.sock.sendMessage(jid, { text }, {
+        quoted: {
+          key: { remoteJid: jid, id: quotedId },
+          message: { conversation: '' },
+        } as any,
+      });
+      return { sent: true };
+    } catch (err: any) {
+      this.emit({ type: 'error', source: 'reply', error: err.message });
+      throw err;
+    }
+  }
+
+  /**
+   * React to a message with an emoji.
+   * Send an empty emoji string to remove a reaction.
+   * @param jid WhatsApp JID — the chat containing the message
+   * @param messageId Message ID to react to
+   * @param emoji Emoji to react with (e.g. "👍"), or empty string to remove {@example "👍"}
+   */
+  async react(params: { jid: string; messageId: string; emoji: string }): Promise<{ sent: boolean }> {
+    if (!this.connected || !this.sock) {
+      throw new Error('Not connected. Call connect() first.');
+    }
+
+    const { jid, messageId, emoji } = params;
+    try {
+      await this.sock.sendMessage(jid, {
+        react: {
+          text: emoji,
+          key: { remoteJid: jid, id: messageId },
+        },
+      });
+      return { sent: true };
+    } catch (err: any) {
+      this.emit({ type: 'error', source: 'react', error: err.message });
+      throw err;
+    }
+  }
+
+  /**
+   * Send media (image, video, audio, or document) to a WhatsApp chat.
+   * Accepts a URL or local file path as the source.
+   * @param jid WhatsApp JID — group or contact
+   * @param url URL or local file path of the media
+   * @param type Media type {@choice image, video, audio, document}
+   * @param caption Optional caption for the media
+   * @param filename Optional filename (used for document type)
+   */
+  async media(params: {
+    jid: string;
+    url: string;
+    type: 'image' | 'video' | 'audio' | 'document';
+    caption?: string;
+    filename?: string;
+  }): Promise<{ sent: boolean }> {
+    if (!this.connected || !this.sock) {
+      throw new Error('Not connected. Call connect() first.');
+    }
+
+    const { jid, url, type, caption, filename } = params;
+
+    // Determine if source is a local file or a URL
+    const isLocal = !url.startsWith('http://') && !url.startsWith('https://');
+    const source = isLocal ? fs.readFileSync(url) : { url };
+
+    const msgPayload: Record<string, any> = {};
+    switch (type) {
+      case 'image':
+        msgPayload.image = source;
+        if (caption) msgPayload.caption = caption;
+        break;
+      case 'video':
+        msgPayload.video = source;
+        if (caption) msgPayload.caption = caption;
+        break;
+      case 'audio':
+        msgPayload.audio = source;
+        msgPayload.mimetype = 'audio/mpeg';
+        break;
+      case 'document':
+        msgPayload.document = source;
+        msgPayload.mimetype = 'application/octet-stream';
+        if (filename) msgPayload.fileName = filename;
+        if (caption) msgPayload.caption = caption;
+        break;
+    }
+
+    try {
+      await this.sock.sendMessage(jid, msgPayload);
+      return { sent: true };
+    } catch (err: any) {
+      this.emit({ type: 'error', source: 'media', error: err.message });
+      throw err;
     }
   }
 
@@ -285,7 +402,9 @@ export default class WhatsApp extends Photon {
       for (const [jid, meta] of Object.entries(fetched)) {
         if (meta.subject) this.knownGroups[jid] = meta.subject;
       }
-    } catch {
+      this._rebuildGroupIndex();
+    } catch (err: any) {
+      this.emit({ type: 'error', source: 'groups', error: err.message });
       // Fall through to return cached groups
     }
 
@@ -301,6 +420,72 @@ export default class WhatsApp extends Photon {
   async pending(): Promise<Array<{ chatJid: string; message: InboundMessage }>> {
     const messages = this._pendingMessages.splice(0);
     return messages;
+  }
+
+  /**
+   * Generate a group invite link.
+   * @param jid Group JID
+   * @readOnly
+   */
+  async invite(params: { jid: string }): Promise<{ link: string }> {
+    if (!this.connected || !this.sock) {
+      throw new Error('Not connected. Call connect() first.');
+    }
+    try {
+      const code = await this.sock.groupInviteCode(params.jid);
+      return { link: `https://chat.whatsapp.com/${code}` };
+    } catch (err: any) {
+      this.emit({ type: 'error', source: 'invite', error: err.message });
+      throw err;
+    }
+  }
+
+  /**
+   * List members of a group with their roles.
+   * @param jid Group JID
+   * @readOnly
+   * @format table
+   */
+  async members(params: { jid: string }): Promise<Array<{ jid: string; admin: string }>> {
+    if (!this.connected || !this.sock) {
+      throw new Error('Not connected. Call connect() first.');
+    }
+    try {
+      const meta = await this.sock.groupMetadata(params.jid);
+      return meta.participants.map((p: any) => ({
+        jid: p.id,
+        admin: p.admin || 'member',
+      }));
+    } catch (err: any) {
+      this.emit({ type: 'error', source: 'members', error: err.message });
+      throw err;
+    }
+  }
+
+  /**
+   * Group admin operations: add, remove, promote, or demote members.
+   * @param jid Group JID
+   * @param action Admin action to perform {@choice add, remove, promote, demote}
+   * @param members Array of member JIDs to act on
+   * @destructive
+   */
+  async admin(params: {
+    jid: string;
+    action: 'add' | 'remove' | 'promote' | 'demote';
+    members: string[];
+  }): Promise<{ done: boolean }> {
+    if (!this.connected || !this.sock) {
+      throw new Error('Not connected. Call connect() first.');
+    }
+
+    const { jid, action, members } = params;
+    try {
+      await this.sock.groupParticipantsUpdate(jid, members, action);
+      return { done: true };
+    } catch (err: any) {
+      this.emit({ type: 'error', source: 'admin', error: err.message });
+      throw err;
+    }
   }
 
   /**
@@ -323,9 +508,8 @@ export default class WhatsApp extends Photon {
     // Resolve group name → JID eagerly if groups are already known
     if (filter?.group) {
       const query = filter.group.toLowerCase();
-      const jid = Object.entries(this.knownGroups).find(
-        ([, name]) => name.toLowerCase().includes(query)
-      )?.[0];
+      const jid = this._groupNameIndex.get(query)
+        || [...this._groupNameIndex.entries()].find(([name]) => name.includes(query))?.[1];
       if (jid) entry.resolvedJid = jid;
     }
 
@@ -349,10 +533,19 @@ export default class WhatsApp extends Photon {
   async typing(params: { jid: string; typing: boolean }): Promise<void> {
     if (!this.connected || !this.sock) return;
     const status = params.typing ? 'composing' : 'paused';
-    await this.sock.sendPresenceUpdate(status, params.jid).catch(() => {});
+    await this.sock.sendPresenceUpdate(status, params.jid).catch((err: any) => {
+      this.emit({ type: 'error', source: 'typing', error: err.message });
+    });
   }
 
   // ─── Internal ──────────────────────────────────────────────────
+
+  private _rebuildGroupIndex(): void {
+    this._groupNameIndex.clear();
+    for (const [jid, name] of Object.entries(this.knownGroups)) {
+      this._groupNameIndex.set(name.toLowerCase(), jid);
+    }
+  }
 
   private _wireSocketEvents(saveCreds: () => Promise<void>): void {
     if (!this.sock) return;
@@ -395,7 +588,9 @@ export default class WhatsApp extends Photon {
         this.reconnectAttempts++;
         const baseDelay = isRateLimited ? 30_000 : 1000;
         const delay = Math.min(baseDelay * 2 ** Math.min(this.reconnectAttempts - 1, 6), 120_000);
-        setTimeout(() => this._reconnect().catch(() => {}), delay);
+        setTimeout(() => this._reconnect().catch((err: any) => {
+          this.emit({ type: 'error', source: 'reconnect', error: err.message });
+        }), delay);
       } else if (connection === 'open') {
         this.connected = true;
         this.qrPending = false;
@@ -407,9 +602,15 @@ export default class WhatsApp extends Photon {
 
         this._lastQR = null;
         this.emit({ type: 'connected', phone: this.phoneNumber });
-        this._flushQueue().catch(() => {});
-        this._syncGroups().catch(() => {});
-        this.sock?.sendPresenceUpdate('available').catch(() => {});
+        this._flushQueue().catch((err: any) => {
+          this.emit({ type: 'error', source: 'flush_queue', error: err.message });
+        });
+        this._syncGroups().catch((err: any) => {
+          this.emit({ type: 'error', source: 'sync_groups', error: err.message });
+        });
+        this.sock?.sendPresenceUpdate('available').catch((err: any) => {
+          this.emit({ type: 'error', source: 'presence', error: err.message });
+        });
       }
     });
 
@@ -421,30 +622,17 @@ export default class WhatsApp extends Photon {
         const rawJid = msg.key.remoteJid;
         if (!rawJid || rawJid === 'status@broadcast') continue;
 
-        const content =
-          msg.message?.conversation ||
-          msg.message?.extendedTextMessage?.text ||
-          msg.message?.imageMessage?.caption ||
-          msg.message?.videoMessage?.caption ||
-          '';
-
-        if (!content) continue;
-
         const chatJid = rawJid;
         const sender = msg.key.participant || msg.key.remoteJid || '';
         const senderName = msg.pushName || sender.split('@')[0];
-        const timestamp = new Date(Number(msg.messageTimestamp) * 1000).toISOString();
+        const ts = Number(msg.messageTimestamp);
+        const timestamp = ts > 0 ? new Date(ts * 1000).toISOString() : new Date().toISOString();
         const fromMe = msg.key.fromMe || false;
+        const messageId = msg.key.id || '';
 
-        const inbound: InboundMessage = {
-          id: msg.key.id || '',
-          chatJid,
-          sender,
-          senderName,
-          content,
-          timestamp,
-          fromMe,
-        };
+        const inbound = this._extractMessage(msg.message, {
+          messageId, chatJid, sender, senderName, timestamp, fromMe,
+        });
 
         // Buffer for polling via pending()
         this._pendingMessages.push({ chatJid, message: inbound });
@@ -464,17 +652,20 @@ export default class WhatsApp extends Photon {
               // Lazy-resolve group name if not yet resolved
               if (!entry.resolvedJid) {
                 const query = f.group.toLowerCase();
-                const jid = Object.entries(this.knownGroups).find(
-                  ([, name]) => name.toLowerCase().includes(query)
-                )?.[0];
+                const jid = this._groupNameIndex.get(query)
+                  || [...this._groupNameIndex.entries()].find(([name]) => name.includes(query))?.[1];
                 if (jid) entry.resolvedJid = jid;
               }
               if (entry.resolvedJid && entry.resolvedJid !== chatJid) continue;
             }
-            if (f.trigger && !content.includes(f.trigger)) continue;
+            if (f.trigger && !inbound.content.includes(f.trigger)) continue;
             if (f.fromMe !== undefined && f.fromMe !== fromMe) continue;
           }
-          try { entry.fn({ chatJid, message: inbound }); } catch { /* best-effort */ }
+          try {
+            entry.fn({ chatJid, message: inbound });
+          } catch (err: any) {
+            this.emit({ type: 'error', source: 'event_listener', error: err.message });
+          }
         }
 
         // Emit on channel — framework auto-prefixes with photon name ('whatsapp:messages')
@@ -486,6 +677,133 @@ export default class WhatsApp extends Photon {
         });
       }
     });
+  }
+
+  /** Extract rich message fields from a Baileys message object */
+  private _extractMessage(
+    message: any,
+    base: { messageId: string; chatJid: string; sender: string; senderName: string; timestamp: string; fromMe: boolean },
+  ): InboundMessage {
+    const m = message;
+    const result: InboundMessage = {
+      id: base.messageId,
+      chatJid: base.chatJid,
+      sender: base.sender,
+      senderName: base.senderName,
+      content: '',
+      timestamp: base.timestamp,
+      fromMe: base.fromMe,
+      type: 'unknown',
+      messageId: base.messageId,
+    };
+
+    // Text messages
+    if (m.conversation) {
+      result.type = 'text';
+      result.content = m.conversation;
+    } else if (m.extendedTextMessage) {
+      result.type = 'text';
+      result.content = m.extendedTextMessage.text || '';
+      // Check for quoted message
+      const ctx = m.extendedTextMessage.contextInfo;
+      if (ctx?.quotedMessage) {
+        result.quotedMessage = {
+          id: ctx.stanzaId || '',
+          content: ctx.quotedMessage.conversation || ctx.quotedMessage.extendedTextMessage?.text || '',
+          sender: ctx.participant || '',
+        };
+      }
+    }
+    // Image
+    else if (m.imageMessage) {
+      result.type = 'image';
+      result.content = m.imageMessage.caption || '';
+      result.media = {
+        mimetype: m.imageMessage.mimetype || 'image/jpeg',
+        caption: m.imageMessage.caption,
+      };
+    }
+    // Video
+    else if (m.videoMessage) {
+      result.type = 'video';
+      result.content = m.videoMessage.caption || '';
+      result.media = {
+        mimetype: m.videoMessage.mimetype || 'video/mp4',
+        caption: m.videoMessage.caption,
+        seconds: m.videoMessage.seconds,
+      };
+    }
+    // Audio
+    else if (m.audioMessage) {
+      result.type = 'audio';
+      result.media = {
+        mimetype: m.audioMessage.mimetype || 'audio/ogg',
+        seconds: m.audioMessage.seconds,
+      };
+    }
+    // Document
+    else if (m.documentMessage) {
+      result.type = 'document';
+      result.content = m.documentMessage.caption || '';
+      result.media = {
+        mimetype: m.documentMessage.mimetype || 'application/octet-stream',
+        caption: m.documentMessage.caption,
+        filename: m.documentMessage.fileName,
+      };
+    }
+    // Sticker
+    else if (m.stickerMessage) {
+      result.type = 'sticker';
+      result.media = {
+        mimetype: m.stickerMessage.mimetype || 'image/webp',
+      };
+    }
+    // Reaction
+    else if (m.reactionMessage) {
+      result.type = 'reaction';
+      result.content = m.reactionMessage.text || '';
+      result.reaction = {
+        emoji: m.reactionMessage.text || '',
+        targetMessageId: m.reactionMessage.key?.id || '',
+      };
+    }
+    // Location
+    else if (m.locationMessage) {
+      result.type = 'location';
+      result.content = m.locationMessage.name || m.locationMessage.address || '';
+      result.location = {
+        lat: m.locationMessage.degreesLatitude,
+        lng: m.locationMessage.degreesLongitude,
+        name: m.locationMessage.name,
+      };
+    }
+    // Live location
+    else if (m.liveLocationMessage) {
+      result.type = 'location';
+      result.content = m.liveLocationMessage.caption || '';
+      result.location = {
+        lat: m.liveLocationMessage.degreesLatitude,
+        lng: m.liveLocationMessage.degreesLongitude,
+      };
+    }
+    // Contact
+    else if (m.contactMessage) {
+      result.type = 'contact';
+      result.content = m.contactMessage.displayName || '';
+    }
+    // Poll
+    else if (m.pollCreationMessage || m.pollCreationMessageV3) {
+      const poll = m.pollCreationMessage || m.pollCreationMessageV3;
+      result.type = 'poll';
+      result.content = poll.name || '';
+    }
+    // Protocol messages (deletes, edits) — emit but don't drop silently
+    else if (m.protocolMessage) {
+      result.type = 'unknown';
+      result.content = '';
+    }
+
+    return result;
   }
 
   private async _reconnect(): Promise<void> {
@@ -511,8 +829,14 @@ export default class WhatsApp extends Photon {
     if (this.flushing || !this.outgoingQueue.length || !this.sock) return;
     this.flushing = true;
     try {
+      const now = Date.now();
       while (this.outgoingQueue.length > 0) {
         const item = this.outgoingQueue.shift()!;
+        // Drop stale messages older than TTL
+        if (item.queuedAt && now - item.queuedAt > MESSAGE_TTL_MS) {
+          this.emit({ type: 'message_expired', jid: item.jid, age: now - item.queuedAt });
+          continue;
+        }
         await this.sock.sendMessage(item.jid, { text: item.text });
       }
     } finally {
@@ -527,8 +851,8 @@ export default class WhatsApp extends Photon {
         fs.rmSync(path.join(this.authDir, entry), { recursive: true, force: true });
       }
       this.emit({ type: 'auth_cleared' });
-    } catch {
-      // Auth dir may not exist
+    } catch (err: any) {
+      this.emit({ type: 'error', source: 'clear_auth', error: err.message });
     }
   }
 
@@ -539,7 +863,10 @@ export default class WhatsApp extends Photon {
       for (const [jid, meta] of Object.entries(groups)) {
         if (meta.subject) this.knownGroups[jid] = meta.subject;
       }
-    } catch {}
+      this._rebuildGroupIndex();
+    } catch (err: any) {
+      this.emit({ type: 'error', source: 'sync_groups', error: err.message });
+    }
   }
 }
 
@@ -553,4 +880,10 @@ interface InboundMessage {
   content: string;
   timestamp: string;
   fromMe: boolean;
+  type: 'text' | 'image' | 'video' | 'audio' | 'document' | 'sticker' | 'reaction' | 'location' | 'contact' | 'poll' | 'unknown';
+  messageId: string;
+  media?: { mimetype: string; caption?: string; filename?: string; seconds?: number };
+  reaction?: { emoji: string; targetMessageId: string };
+  location?: { lat: number; lng: number; name?: string };
+  quotedMessage?: { id: string; content: string; sender: string };
 }
