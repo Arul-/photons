@@ -287,10 +287,11 @@ export default class AgentRunner extends Photon {
           args.push('--add-dir', dir);
         }
       }
-      // Per-run additional directories (e.g. media download dirs)
+      // Per-run additional directories — resolved relative to baseDir if not absolute
       if (addDirs) {
         for (const dir of addDirs) {
-          args.push('--add-dir', dir);
+          const resolved = path.isAbsolute(dir) ? dir : path.join(this.settings.baseDir, dir);
+          args.push('--add-dir', resolved);
         }
       }
       if (sessionId) {

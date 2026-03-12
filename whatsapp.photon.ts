@@ -252,16 +252,17 @@ export default class WhatsApp extends Photon {
   }
 
   /**
-   * Send a message to a WhatsApp JID.
+   * Send a message to a WhatsApp chat.
+   * Accepts a group name, phone number, or raw JID.
    * Queues automatically if currently disconnected.
    *
    * @title Send Message
    * @openWorld
-   * @param jid WhatsApp JID — group (@g.us) or contact (@s.whatsapp.net) {@example "12345678901@s.whatsapp.net"}
+   * @param chat Group name, phone number, or JID {@example "Arul and Lura"}
    * @param text Message text to send
    */
-  async send(params: { jid: string; text: string }): Promise<{ queued: boolean; key?: MessageKey }> {
-    const { jid } = params;
+  async send(params: { chat: string; text: string }): Promise<{ queued: boolean; key?: MessageKey }> {
+    const jid = await this._resolveJid(params.chat);
     const text = markdownToWa(params.text);
 
     if (!this.connected || !this.sock) {
@@ -280,21 +281,23 @@ export default class WhatsApp extends Photon {
   }
 
   /**
-   * Edit a previously sent message.
+   * Edit a previously sent message in-place.
    * Only works on messages sent by this bot.
+   * The JID is derived from the message key — no chat param needed.
    *
    * @title Edit Message
    * @openWorld
-   * @param jid WhatsApp JID of the chat
    * @param key Message key returned from send()
    * @param text New message text
    */
-  async edit(params: { jid: string; key: MessageKey; text: string }): Promise<void> {
+  async edit(params: { key: MessageKey; text: string }): Promise<void> {
     if (!this.connected || !this.sock) {
       throw new Error('Not connected. Call connect() first.');
     }
+    const jid = params.key.remoteJid;
+    if (!jid) throw new Error('Message key missing remoteJid');
     const text = markdownToWa(params.text);
-    await this.sock.sendMessage(params.jid, { text, edit: params.key });
+    await this.sock.sendMessage(jid, { text, edit: params.key });
   }
 
   /**
@@ -303,20 +306,20 @@ export default class WhatsApp extends Photon {
    *
    * @title Reply to Message
    * @openWorld
-   * @param jid WhatsApp JID — the chat to reply in
+   * @param chat Group name, phone number, or JID
    * @param text Reply text
    * @param quotedId Message ID to reply to (from inbound message's messageId field)
    */
-  async reply(params: { jid: string; text: string; quotedId: string }): Promise<void> {
+  async reply(params: { chat: string; text: string; quotedId: string }): Promise<void> {
     if (!this.connected || !this.sock) {
       throw new Error('Not connected. Call connect() first.');
     }
 
-    const { jid, quotedId } = params;
+    const jid = await this._resolveJid(params.chat);
     const text = markdownToWa(params.text);
     await this.sock.sendMessage(jid, { text }, {
       quoted: {
-        key: { remoteJid: jid, id: quotedId },
+        key: { remoteJid: jid, id: params.quotedId },
         message: { conversation: '' },
       } as any,
     });
@@ -328,20 +331,20 @@ export default class WhatsApp extends Photon {
    *
    * @title React to Message
    * @openWorld
-   * @param jid WhatsApp JID — the chat containing the message
+   * @param chat Group name, phone number, or JID
    * @param messageId Message ID to react to
    * @param emoji Emoji to react with (e.g. "👍"), or empty string to remove {@example "👍"}
    */
-  async react(params: { jid: string; messageId: string; emoji: string }): Promise<void> {
+  async react(params: { chat: string; messageId: string; emoji: string }): Promise<void> {
     if (!this.connected || !this.sock) {
       throw new Error('Not connected. Call connect() first.');
     }
 
-    const { jid, messageId, emoji } = params;
+    const jid = await this._resolveJid(params.chat);
     await this.sock.sendMessage(jid, {
       react: {
-        text: emoji,
-        key: { remoteJid: jid, id: messageId },
+        text: params.emoji,
+        key: { remoteJid: jid, id: params.messageId },
       },
     });
   }
@@ -352,14 +355,14 @@ export default class WhatsApp extends Photon {
    *
    * @title Send Media
    * @openWorld
-   * @param jid WhatsApp JID — group or contact
+   * @param chat Group name, phone number, or JID
    * @param url URL or local file path of the media
    * @param type Media type {@choice image, video, audio, document}
    * @param caption Optional caption for the media
    * @param filename Optional filename (used for document type)
    */
   async media(params: {
-    jid: string;
+    chat: string;
     url: string;
     type: 'image' | 'video' | 'audio' | 'document';
     caption?: string;
@@ -369,7 +372,8 @@ export default class WhatsApp extends Photon {
       throw new Error('Not connected. Call connect() first.');
     }
 
-    const { jid, url, type, caption, filename } = params;
+    const jid = await this._resolveJid(params.chat);
+    const { url, type, caption, filename } = params;
 
     // Determine if source is a local file or a URL
     const isLocal = !url.startsWith('http://') && !url.startsWith('https://');
@@ -470,14 +474,15 @@ export default class WhatsApp extends Photon {
    * @title Group Invite Link
    * @readOnly
    * @openWorld
-   * @param jid Group JID
+   * @param chat Group name or JID
    */
-  async invite(params: { jid: string }): Promise<{ link: string }> {
+  async invite(params: { chat: string }): Promise<{ link: string }> {
     if (!this.connected || !this.sock) {
       throw new Error('Not connected. Call connect() first.');
     }
     try {
-      const code = await this.sock.groupInviteCode(params.jid);
+      const jid = await this._resolveJid(params.chat);
+      const code = await this.sock.groupInviteCode(jid);
       return { link: `https://chat.whatsapp.com/${code}` };
     } catch (err: any) {
       this.emit({ type: 'error', source: 'invite', error: err.message });
@@ -492,14 +497,15 @@ export default class WhatsApp extends Photon {
    * @readOnly
    * @openWorld
    * @format table
-   * @param jid Group JID
+   * @param chat Group name or JID
    */
-  async members(params: { jid: string }): Promise<Array<{ jid: string; admin: string }>> {
+  async members(params: { chat: string }): Promise<Array<{ jid: string; admin: string }>> {
     if (!this.connected || !this.sock) {
       throw new Error('Not connected. Call connect() first.');
     }
     try {
-      const meta = await this.sock.groupMetadata(params.jid);
+      const jid = await this._resolveJid(params.chat);
+      const meta = await this.sock.groupMetadata(jid);
       return meta.participants.map((p: any) => ({
         jid: p.id,
         admin: p.admin || 'member',
@@ -516,12 +522,12 @@ export default class WhatsApp extends Photon {
    * @title Group Admin
    * @destructive
    * @openWorld
-   * @param jid Group JID
+   * @param chat Group name or JID
    * @param action Admin action to perform {@choice add, remove, promote, demote}
    * @param members Array of member JIDs to act on
    */
   async admin(params: {
-    jid: string;
+    chat: string;
     action: 'add' | 'remove' | 'promote' | 'demote';
     members: string[];
   }): Promise<void> {
@@ -529,8 +535,8 @@ export default class WhatsApp extends Photon {
       throw new Error('Not connected. Call connect() first.');
     }
 
-    const { jid, action, members } = params;
-    await this.sock.groupParticipantsUpdate(jid, members, action);
+    const jid = await this._resolveJid(params.chat);
+    await this.sock.groupParticipantsUpdate(jid, params.members, params.action);
   }
 
   /**
@@ -558,11 +564,15 @@ export default class WhatsApp extends Photon {
       if (jid) entry.resolvedJid = jid;
     }
 
-    // If a JID-filtered listener for this event already exists, replace it.
+    // If a JID- or group-name-filtered listener for this event already exists, replace it.
     // This prevents stale handlers accumulating across claw restarts where the
     // new instance has no reference to the old handler functions.
-    if (filter?.jid) {
-      const idx = this._eventListeners.findIndex(e => e.event === event && e.filter?.jid === filter.jid);
+    if (filter?.jid || filter?.group) {
+      const idx = this._eventListeners.findIndex(e =>
+        e.event === event &&
+        ((filter.jid && e.filter?.jid === filter.jid) ||
+         (filter.group && e.filter?.group === filter.group))
+      );
       if (idx !== -1) this._eventListeners.splice(idx, 1);
     }
 
@@ -583,13 +593,15 @@ export default class WhatsApp extends Photon {
    *
    * @title Set Typing Indicator
    * @openWorld
-   * @param jid WhatsApp JID of the chat
+   * @param chat Group name, phone number, or JID
    * @param typing True to show composing, false to clear
    */
-  async typing(params: { jid: string; typing: boolean }): Promise<void> {
+  async typing(params: { chat: string; typing: boolean }): Promise<void> {
     if (!this.connected || !this.sock) return;
+    const jid = await this._resolveJid(params.chat).catch(() => null);
+    if (!jid) return;
     const status = params.typing ? 'composing' : 'paused';
-    await this.sock.sendPresenceUpdate(status, params.jid).catch((err: any) => {
+    await this.sock.sendPresenceUpdate(status, jid).catch((err: any) => {
       this.emit({ type: 'error', source: 'typing', error: err.message });
     });
   }
@@ -601,6 +613,23 @@ export default class WhatsApp extends Photon {
     for (const [jid, name] of Object.entries(this.knownGroups)) {
       this._groupNameIndex.set(name.toLowerCase(), jid);
     }
+  }
+
+  /** Resolve a human-readable chat identifier to a WhatsApp JID.
+   * - Already a JID (contains '@')  → passthrough
+   * - Phone number (digits/+/spaces) → NNN@s.whatsapp.net
+   * - Group name                     → fuzzy lookup via _groupNameIndex (lazy-syncs if empty)
+   */
+  private async _resolveJid(chat: string): Promise<string> {
+    if (chat.includes('@')) return chat;
+    if (/^\+?[\d\s\-()+]+$/.test(chat)) return `${chat.replace(/\D/g, '')}@s.whatsapp.net`;
+    // Group name — lazy sync if index not populated yet
+    if (this._groupNameIndex.size === 0 && this.connected) await this._syncGroups();
+    const query = chat.toLowerCase();
+    const jid = this._groupNameIndex.get(query)
+      || [...this._groupNameIndex.entries()].find(([name]) => name.includes(query))?.[1];
+    if (!jid) throw new Error(`No group matching "${chat}". Call groups() to see available groups.`);
+    return jid;
   }
 
   /** Download media from a Baileys message and attach the file path to the InboundMessage */

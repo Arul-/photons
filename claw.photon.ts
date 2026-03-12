@@ -21,11 +21,11 @@ export default class Claw extends Photon {
   private lastHealth: { ok: boolean; whatsapp: string; runner: string; checkedAt: string } | null = null;
   private autoResumeTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // Group registry — persisted via this.memory
-  private registry: Record<string, RegisteredGroup> = {}; // jid → group
-  // Message handlers — one per registered group
-  private handlers: Map<string, (msg: any) => void> = new Map(); // jid → handler
-  // Message log per folder for context building
+  // Group registry — persisted via this.memory, keyed by canonical group name
+  private registry: Record<string, GroupConfig> = {};
+  // Message handlers — one per registered group, keyed by group name
+  private handlers: Map<string, (msg: any) => void> = new Map();
+  // Message log per group name for context building
   private messageLog: Record<string, MessageEntry[]> = {};
   constructor(
     private whatsapp: any,
@@ -64,7 +64,7 @@ export default class Claw extends Photon {
     }
 
     // Normal startup — restore persisted state
-    const saved = await this.memory.get<Record<string, RegisteredGroup>>('registry');
+    const saved = await this.memory.get<Record<string, GroupConfig>>('registry');
     if (saved) this.registry = saved;
 
     const savedSessions = await this.memory.get<Record<string, string>>('sessionMap');
@@ -187,16 +187,16 @@ export default class Claw extends Photon {
    * @title Register Group
    * @openWorld
    * @param group WhatsApp group name or partial match {@example "Learn CS"}
-   * @param folder Group folder name for agent context {@example "learn-cs"}
-   * @param trigger Trigger pattern {@example "@bot"}
-   * @param requiresTrigger Only route messages with trigger (default: true)
+   * @param trigger Trigger word to activate the agent {@example "@"}
+   * @param folders Folder names the agent can access — first is the primary context folder {@example ["lura", "photon"]}
+   * @param requiresTrigger Only route messages containing the trigger (default: true)
    */
   async register(params: {
     group: string;
-    folder: string;
     trigger: string;
+    folders: string[];
     requiresTrigger?: boolean;
-  }): Promise<RegisteredGroup> {
+  }): Promise<{ name: string } & GroupConfig> {
     const waGroups = await this.whatsapp.groups();
     const query = params.group.toLowerCase();
     const match = waGroups.find((g: any) =>
@@ -208,25 +208,23 @@ export default class Claw extends Photon {
       );
     }
 
-    const group: RegisteredGroup = {
-      jid: match.jid,
-      name: match.name,
-      folder: params.folder,
+    const config: GroupConfig = {
       trigger: params.trigger,
       requiresTrigger: params.requiresTrigger ?? true,
+      folders: params.folders,
       addedAt: new Date().toISOString(),
     };
 
-    this.registry[match.jid] = group;
+    this.registry[match.name] = config;
     await this.memory.set('registry', this.registry);
 
     // Subscribe immediately if running
     if (this.running) {
-      this._subscribeGroup(group);
+      this._subscribeGroup(match.name, config);
     }
 
-    this.emit({ type: 'registered', group });
-    return group;
+    this.emit({ type: 'registered', name: match.name, config });
+    return { name: match.name, ...config };
   }
 
   /**
@@ -234,26 +232,23 @@ export default class Claw extends Photon {
    *
    * @title Unregister Group
    * @destructive
-   * @param group WhatsApp group name or JID to unregister {@example "Learn CS"}
+   * @param group Group name (partial match) {@example "Learn CS"}
    */
   async unregister(params: { group: string }): Promise<void> {
     const query = params.group.toLowerCase();
-    const jid = Object.values(this.registry).find(
-      g => g.name.toLowerCase().includes(query) || g.jid === params.group
-    )?.jid;
+    const name = Object.keys(this.registry).find(k => k.toLowerCase().includes(query));
 
-    if (!jid) throw new Error(`No group matching "${params.group}"`);
+    if (!name) throw new Error(`No group matching "${params.group}"`);
 
-    // Unsubscribe handler
-    const handler = this.handlers.get(jid);
+    const handler = this.handlers.get(name);
     if (handler) {
       this.whatsapp.off('message', handler);
-      this.handlers.delete(jid);
+      this.handlers.delete(name);
     }
 
-    delete this.registry[jid];
+    delete this.registry[name];
     await this.memory.set('registry', this.registry);
-    this.emit({ type: 'unregistered', jid });
+    this.emit({ type: 'unregistered', name });
   }
 
   /**
@@ -264,15 +259,16 @@ export default class Claw extends Photon {
    * @openWorld
    * @format table
    */
-  async groups(): Promise<Array<{ jid: string; name: string; registered: boolean }>> {
+  async groups(): Promise<Array<{ name: string; registered: boolean; folders?: string[]; trigger?: string }>> {
     const waGroups = await this.whatsapp.groups();
-    const registeredJids = new Set(Object.keys(this.registry));
-
-    return waGroups.map((g: any) => ({
-      jid: g.jid,
-      name: g.name,
-      registered: registeredJids.has(g.jid),
-    }));
+    return waGroups.map((g: any) => {
+      const config = this.registry[g.name];
+      return {
+        name: g.name,
+        registered: !!config,
+        ...(config ? { folders: config.folders, trigger: config.trigger } : {}),
+      };
+    });
   }
 
   /**
@@ -315,7 +311,7 @@ export default class Claw extends Photon {
     running: boolean;
     whatsapp: any;
     runner: any;
-    groups: RegisteredGroup[];
+    groups: Array<{ name: string } & GroupConfig>;
   }> {
     const safe = async (fn: () => Promise<any>, fallback: any = null) => {
       try { return await fn(); } catch { return fallback; }
@@ -330,37 +326,34 @@ export default class Claw extends Photon {
       running: this.running,
       whatsapp,
       runner: runnerStatus,
-      groups: Object.values(this.registry),
+      groups: Object.entries(this.registry).map(([name, cfg]) => ({ name, ...cfg })),
     };
   }
 
   // ─── Internal ──────────────────────────────────────────────────
 
   private _subscribeAll(): void {
-    for (const group of Object.values(this.registry)) {
-      this._subscribeGroup(group);
+    for (const [name, config] of Object.entries(this.registry)) {
+      this._subscribeGroup(name, config);
     }
   }
 
-  private _subscribeGroup(group: RegisteredGroup): void {
+  private _subscribeGroup(name: string, config: GroupConfig): void {
     // Remove existing handler for this group if any
-    const existing = this.handlers.get(group.jid);
+    const existing = this.handlers.get(name);
     if (existing) this.whatsapp.off('message', existing);
 
     const handler = (msg: any) => {
       if (!this.running) return;
-      this._handleMessage(group, msg).catch((err) => {
-        this.emit({ type: 'handle_error', chatJid: msg.chatJid, error: err.message });
+      this._handleMessage(name, config, msg).catch((err) => {
+        this.emit({ type: 'handle_error', group: name, error: err.message });
       });
     };
 
-    // Use .on() with group + trigger filter
-    const filter: any = { jid: group.jid };
-    if (group.requiresTrigger) {
-      filter.trigger = group.trigger;
-    }
+    const filter: any = { group: name };
+    if (config.requiresTrigger) filter.trigger = config.trigger;
     this.whatsapp.on('message', handler, filter);
-    this.handlers.set(group.jid, handler);
+    this.handlers.set(name, handler);
   }
 
   private _unsubscribeAll(): void {
@@ -404,7 +397,7 @@ export default class Claw extends Photon {
     this.emit({ type: 'heartbeat', ok, whatsapp: waStatus, runner: runnerStatus, checkedAt });
   }
 
-  private async _handleMessage(group: RegisteredGroup, event: {
+  private async _handleMessage(name: string, config: GroupConfig, event: {
     chatJid: string;
     message: {
       sender: string; senderName: string; content: string; fromMe: boolean; timestamp: string;
@@ -412,80 +405,79 @@ export default class Claw extends Photon {
     };
   }): Promise<void> {
     const msg = event.message;
+    const primaryFolder = config.folders[0];
 
     // Skip own messages when no trigger required (prevents loops)
-    if (!group.requiresTrigger && msg.fromMe) return;
+    if (!config.requiresTrigger && msg.fromMe) return;
 
-    // Log the message for context (content is already Markdown — WhatsApp photon converts it)
+    // Log the message for context, keyed by group name
     const entry: MessageEntry = {
       sender: msg.senderName,
       content: msg.content,
       timestamp: msg.timestamp,
       fromMe: msg.fromMe,
     };
-    if (!this.messageLog[group.folder]) this.messageLog[group.folder] = [];
-    const log = this.messageLog[group.folder];
+    if (!this.messageLog[name]) this.messageLog[name] = [];
+    const log = this.messageLog[name];
     log.push(entry);
     if (log.length > this.settings.maxMessageLog) log.splice(0, log.length - this.settings.maxMessageLog);
 
-    // Build context from recent messages (include media metadata)
     const context = this._formatContext(log.slice(-20), msg);
 
     this.emit({
       type: 'routing',
-      jid: event.chatJid,
-      folder: group.folder,
+      group: name,
+      folders: config.folders,
       textPreview: msg.content.slice(0, 80),
       messageType: msg.type || 'text',
     });
 
-    // Quick ACK so the user knows the message was received.
-    // We capture the key so we can edit it in-place with the final response.
+    // Quick ACK so the user knows the message was received
     const acks = ['Noted, on it.', 'Got it, thinking...', 'On it.', 'Noted.', 'Working on it...'];
-    const ackResult = await this.whatsapp.send({ jid: event.chatJid, text: acks[Math.floor(Math.random() * acks.length)] }).catch(() => null);
+    const ackResult = await this.whatsapp.send({ chat: name, text: acks[Math.floor(Math.random() * acks.length)] }).catch(() => null);
     const ackKey = ackResult?.key ?? null;
 
     // Keep typing indicator alive during agent processing (WhatsApp expires it after ~25s)
-    await this.whatsapp.typing({ jid: event.chatJid, typing: true }).catch(() => {});
+    await this.whatsapp.typing({ chat: name, typing: true }).catch(() => {});
     const typingInterval = setInterval(() => {
-      this.whatsapp.typing({ jid: event.chatJid, typing: true }).catch(() => {});
+      this.whatsapp.typing({ chat: name, typing: true }).catch(() => {});
     }, 20_000);
 
-    // If incoming message has a media file, make it accessible to the agent
-    const addDirs: string[] = [];
+    // Collect addDirs: extra config folders + media dir from attachment
+    const addDirs: string[] = config.folders.slice(1);
     if (msg.filePath) {
       const mediaDir = msg.filePath.substring(0, msg.filePath.lastIndexOf('/'));
-      addDirs.push(mediaDir);
+      if (!addDirs.includes(mediaDir)) addDirs.push(mediaDir);
     }
 
     let result: any;
     try {
       result = await this.runner.run({
-        groupFolder: group.folder,
+        groupFolder: primaryFolder,
         prompt: context,
         chatJid: event.chatJid,
-        sessionId: this.sessionMap[group.folder],
+        sessionId: this.sessionMap[primaryFolder],
         ...(addDirs.length > 0 ? { addDirs } : {}),
       });
     } finally {
       clearInterval(typingInterval);
-      this.whatsapp.typing({ jid: event.chatJid, typing: false }).catch(() => {});
+      this.whatsapp.typing({ chat: name, typing: false }).catch(() => {});
     }
 
     if (result.sessionId) {
-      this.sessionMap[group.folder] = result.sessionId;
+      this.sessionMap[primaryFolder] = result.sessionId;
       await this.memory.set('sessionMap', this.sessionMap);
     }
 
     if (result.status === 'success' && result.output) {
-      await this._sendAgentResponse(event.chatJid, result.output, group.folder, result.duration, ackKey);
+      await this._sendAgentResponse(name, result.output, primaryFolder, result.duration, ackKey);
     } else if (result.error) {
-      this.emit({ type: 'error', source: 'agent-runner', folder: group.folder, error: result.error });
+      this.emit({ type: 'error', source: 'agent-runner', group: name, error: result.error });
     }
   }
 
   /** Send agent response, editing the ACK message in-place if possible */
-  private async _sendAgentResponse(jid: string, output: string, folder: string, duration: number, ackKey?: any): Promise<void> {
+  private async _sendAgentResponse(chat: string, output: string, folder: string, duration: number, ackKey?: any): Promise<void> {
     // Detect media file references in the output:
     // Patterns: ![alt](path) or bare file paths ending in image/video extensions
     const mediaPattern = /!\[([^\]]*)\]\(([^)]+)\)/g;
@@ -520,13 +512,13 @@ export default class Claw extends Photon {
     // Send text portion — edit the ACK in-place if we have its key, else send fresh
     if (textOutput.trim()) {
       if (ackKey) {
-        await this.whatsapp.edit({ jid, key: ackKey, text: textOutput.trim() }).catch(async () => {
+        await this.whatsapp.edit({ key: ackKey, text: textOutput.trim() }).catch(async () => {
           // Fall back to a new message if edit fails (e.g. too old, unsupported client)
-          await this.whatsapp.send({ jid, text: textOutput.trim() });
+          await this.whatsapp.send({ chat, text: textOutput.trim() });
         });
         ackKey = null; // consumed — media attachments below go as separate messages
       } else {
-        await this.whatsapp.send({ jid, text: textOutput.trim() });
+        await this.whatsapp.send({ chat, text: textOutput.trim() });
       }
     }
 
@@ -534,7 +526,7 @@ export default class Claw extends Photon {
     for (const media of mediaFiles) {
       try {
         await this.whatsapp.media({
-          jid,
+          chat,
           url: media.path,
           type: media.type,
           caption: media.caption || undefined,
@@ -542,13 +534,13 @@ export default class Claw extends Photon {
       } catch (err: any) {
         this.emit({ type: 'error', source: 'media_send', folder, error: err.message, path: media.path });
         // Fallback: send the path as text so the user knows something was generated
-        await this.whatsapp.send({ jid, text: `[Media file: ${media.path}]` }).catch(() => {});
+        await this.whatsapp.send({ chat, text: `[Media file: ${media.path}]` }).catch(() => {});
       }
     }
 
     this.emit({
       type: 'replied',
-      jid,
+      group: chat,
       folder,
       duration,
       outputLength: output.length,
@@ -593,12 +585,10 @@ export default class Claw extends Photon {
 
 // ─── Types ─────────────────────────────────────────────────────────
 
-interface RegisteredGroup {
-  jid: string;
-  name: string;
-  folder: string;
+interface GroupConfig {
   trigger: string;
   requiresTrigger: boolean;
+  folders: string[];
   addedAt: string;
 }
 
