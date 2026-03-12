@@ -264,6 +264,9 @@ export default class AgentRunner extends Photon {
       }
 
       const args = ['-p', fullPrompt, '--output-format', 'json'];
+      // Bypass permission prompts — the agent runs as a subprocess, tool access
+      // is controlled by allowedTools whitelist
+      args.push('--dangerously-skip-permissions');
       if (this.settings.allowedTools) {
         args.push('--allowedTools', this.settings.allowedTools);
       }
