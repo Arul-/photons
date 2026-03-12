@@ -32,6 +32,8 @@ export default class AgentRunner extends Photon {
     allowedTools: '',
     /** Claude model to use (e.g. sonnet, opus, haiku) */
     model: '',
+    /** Additional directories Claude can access (comma-separated) */
+    addDirs: '',
   };
 
   async onInitialize(): Promise<void> {
@@ -160,7 +162,7 @@ export default class AgentRunner extends Photon {
   // ─── Internal ──────────────────────────────────────────────────
 
   private _ensureGroupDir(groupFolder: string): string {
-    const groupDir = path.join(this.baseDir, groupFolder);
+    const groupDir = path.isAbsolute(groupFolder) ? groupFolder : path.join(this.baseDir, groupFolder);
     fs.mkdirSync(groupDir, { recursive: true });
     fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
 
@@ -267,6 +269,11 @@ export default class AgentRunner extends Photon {
       }
       if (this.settings.model) {
         args.push('--model', this.settings.model);
+      }
+      if (this.settings.addDirs) {
+        for (const dir of this.settings.addDirs.split(',').map(d => d.trim()).filter(Boolean)) {
+          args.push('--add-dir', dir);
+        }
       }
       if (sessionId) {
         args.push('--resume', sessionId);
