@@ -364,7 +364,8 @@ export default class Claw extends Photon {
       if (wa.status !== 'connected') {
         ok = false;
         this.emit({ type: 'heartbeat_warn', component: 'whatsapp', status: wa.status });
-        this.whatsapp.connect().catch(() => {});
+        // Don't call connect() here — WhatsApp photon handles its own reconnection.
+        // Calling connect() from heartbeat causes socket races (concurrent connections).
       }
     } catch {
       ok = false;
@@ -414,14 +415,24 @@ export default class Claw extends Photon {
       textPreview: msg.content.slice(0, 80),
     });
 
+    // Keep typing indicator alive during agent processing (WhatsApp expires it after ~25s)
     await this.whatsapp.typing({ jid: event.chatJid, typing: true }).catch(() => {});
+    const typingInterval = setInterval(() => {
+      this.whatsapp.typing({ jid: event.chatJid, typing: true }).catch(() => {});
+    }, 20_000);
 
-    const result = await this.runner.run({
-      groupFolder: group.folder,
-      prompt: context,
-      chatJid: event.chatJid,
-      sessionId: this.sessionMap[group.folder],
-    });
+    let result: any;
+    try {
+      result = await this.runner.run({
+        groupFolder: group.folder,
+        prompt: context,
+        chatJid: event.chatJid,
+        sessionId: this.sessionMap[group.folder],
+      });
+    } finally {
+      clearInterval(typingInterval);
+      this.whatsapp.typing({ jid: event.chatJid, typing: false }).catch(() => {});
+    }
 
     if (result.sessionId) {
       this.sessionMap[group.folder] = result.sessionId;

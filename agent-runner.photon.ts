@@ -201,7 +201,12 @@ export default class AgentRunner extends Photon {
     });
 
     try {
-      const result = await this._spawnClaude(groupDir, groupFolder, prompt, sessionId, systemPrompt, runState);
+      let result = await this._spawnClaude(groupDir, groupFolder, prompt, sessionId, systemPrompt, runState);
+
+      // If resume failed (stale session), retry without session ID
+      if (result.status === 'error' && sessionId && result.error?.includes('No conversation found')) {
+        result = await this._spawnClaude(groupDir, groupFolder, prompt, undefined, systemPrompt, runState);
+      }
 
       // Log the run
       const logFile = path.join(groupDir, 'logs', `${new Date().toISOString().replace(/[:.]/g, '-')}.json`);

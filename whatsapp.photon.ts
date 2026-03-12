@@ -38,6 +38,8 @@ export default class WhatsApp extends Photon {
   private flushing = false;
   private knownGroups: Record<string, string> = {}; // jid → name
   private _lastQR: string | null = null;
+  private _connectPromise: Promise<any> | null = null;
+  private _destroyed = false;
   private _pendingMessages: Array<{ chatJid: string; message: InboundMessage }> = [];
   private _eventListeners: Array<{
     event: string;
@@ -58,25 +60,39 @@ export default class WhatsApp extends Photon {
     // This avoids destroying the WhatsApp session (which could trigger 440 bans).
     if (ctx?.reason === 'hot-reload' && ctx.oldInstance) {
       const old = ctx.oldInstance;
-      if (old.sock && old.connected) {
-        this.sock = old.sock;
-        this.connected = old.connected;
-        this.phoneNumber = old.phoneNumber || '';
-        this.knownGroups = old.knownGroups || {};
-        this.outgoingQueue = old.outgoingQueue || [];
-        this._pendingMessages = old._pendingMessages || [];
-        this._eventListeners = old._eventListeners || [];
-        this._lastQR = old._lastQR || null;
-        this.reconnectAttempts = 0;
+      // Transfer state regardless of connection status
+      this.sock = old.sock || null;
+      this.connected = old.connected || false;
+      this.phoneNumber = old.phoneNumber || '';
+      this.knownGroups = old.knownGroups || {};
+      this.outgoingQueue = old.outgoingQueue || [];
+      this._pendingMessages = old._pendingMessages || [];
+      this._eventListeners = old._eventListeners || [];
+      this._lastQR = old._lastQR || null;
+      this._connectPromise = old._connectPromise || null;
+      this.reconnectAttempts = old.reconnectAttempts || 0;
 
-        // Null out old instance's socket reference so it can't interfere
-        old.sock = null;
-        old.connected = false;
+      // Mark old instance as destroyed so its stale timers don't interfere
+      old._destroyed = true;
+      old.connected = false;
+      old._connectPromise = null;
+      // Don't null old.sock — we transferred it, and we need to re-wire events below
 
-        this.emit({ type: 'hot_reload_transferred', phone: this.phoneNumber });
-        return;
+      // Re-wire socket events on this new instance (old handlers are bound to old instance)
+      if (this.sock) {
+        this.sock.ev.removeAllListeners('connection.update');
+        this.sock.ev.removeAllListeners('messages.upsert');
+        // saveCreds is already wired and doesn't reference 'this', so leave it
+        const { saveCreds } = await useMultiFileAuthState(this.authDir);
+        this._wireSocketEvents(saveCreds);
       }
-      // Old instance wasn't connected — fall through to normal auto-connect
+      // Now null the old socket ref
+      old.sock = null;
+
+      if (this.connected) {
+        this.emit({ type: 'hot_reload_transferred', phone: this.phoneNumber });
+      }
+      return; // Don't auto-connect — preserve current state
     }
 
     // Normal startup: auto-connect if we have saved credentials
@@ -119,6 +135,15 @@ export default class WhatsApp extends Photon {
     if (this.connected) {
       return { status: 'already_connected', phone: this.phoneNumber };
     }
+    // Deduplicate concurrent connect() calls — return same promise
+    if (this._connectPromise) {
+      return this._connectPromise;
+    }
+    this._connectPromise = this._doConnect();
+    return this._connectPromise;
+  }
+
+  private async _doConnect(): Promise<any> {
 
     const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
     const { version } = await fetchLatestBaileysVersion();
@@ -158,6 +183,7 @@ export default class WhatsApp extends Photon {
     });
 
     if (first.type === 'error') {
+      this._connectPromise = null;
       const code = Number(first.reason);
       // Session invalid — clear stale credentials and retry to get a fresh QR
       if (code === 440 || code === 401) {
@@ -170,6 +196,8 @@ export default class WhatsApp extends Photon {
       }
       throw new Error(`Connection failed: ${first.reason}`);
     }
+
+    this._connectPromise = null;
 
     if (first.type === 'open') {
       // Had saved credentials — connected immediately
@@ -330,6 +358,7 @@ export default class WhatsApp extends Photon {
     if (!this.sock) return;
 
     this.sock.ev.on('connection.update', (update) => {
+      if (this._destroyed) return; // Old instance after hot-reload — ignore
       const { connection, lastDisconnect } = update;
 
       if (connection === 'close') {
@@ -460,6 +489,7 @@ export default class WhatsApp extends Photon {
   }
 
   private async _reconnect(): Promise<void> {
+    if (this._destroyed) return; // Old instance after hot-reload — don't reconnect
     const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
     const { version } = await fetchLatestBaileysVersion();
 
