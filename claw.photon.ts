@@ -74,7 +74,8 @@ export default class Claw extends Photon {
     if (wasRunning && this.settings.autoResume) {
       const tryResume = async (attempts = 0): Promise<void> => {
         try {
-          await this.start();
+          // Consume the generator — progress emits fire internally
+          for await (const _ of this.start()) { /* yield values are UI-only */ }
           this.emit({ type: 'auto_resumed' });
         } catch {
           if (attempts < 5) {
@@ -97,63 +98,64 @@ export default class Claw extends Photon {
 
   /**
    * Start the pipeline: verify WhatsApp connection, subscribe to registered groups.
-   * WhatsApp must be connected first via `photon whatsapp connect`.
+   * Streams progress while waiting for WhatsApp to connect.
    *
    * @title Start Pipeline
    * @openWorld
    */
-  async start(): Promise<{ status: string; phone?: string; groups?: number; message?: string }> {
-    if (this.running) return { status: 'already running' };
+  async *start() {
+    if (this.running) {
+      return 'Already running';
+    }
 
-    // Wait for WhatsApp to connect
+    yield { emit: 'status', message: 'Checking WhatsApp connection...' };
+
     let waStatus = await this.whatsapp.status();
+
     if (waStatus.status !== 'connected') {
       if (waStatus.status === 'disconnected') {
+        yield { emit: 'status', message: 'WhatsApp disconnected — attempting to reconnect...' };
         try {
           const connectResult = await this.whatsapp.connect();
           if (connectResult.status === 'qr_pending') {
-            return {
-              status: 'qr_pending',
-              message: 'WhatsApp needs QR authentication. Run `photon whatsapp connect` to scan the QR code, then run `claw start` again.',
-            };
+            return 'WhatsApp needs QR authentication. Run `photon whatsapp connect` to scan the QR code, then `claw start` again.';
           }
         } catch {
           // connect() may fail transiently — fall through to polling
         }
       }
 
-      const maxWaitMs = 60_000;
+      // Poll until connected — yield progress so the user sees what's happening
+      const maxWaitMs = 120_000;
       const started = Date.now();
       while (Date.now() - started < maxWaitMs) {
         await new Promise(r => setTimeout(r, 3000));
         waStatus = await this.whatsapp.status();
         if (waStatus.status === 'connected') break;
         const elapsed = Math.round((Date.now() - started) / 1000);
-        this.emit({ type: 'status', message: `Waiting for WhatsApp... (${elapsed}s, status: ${waStatus.status})` });
+        yield { emit: 'status', message: `Waiting for WhatsApp... ${elapsed}s (${waStatus.status})` };
       }
 
       if (waStatus.status !== 'connected') {
-        return {
-          status: 'timeout',
-          message: `WhatsApp did not connect within 60s (status: ${waStatus.status}). Run \`photon whatsapp connect\` manually, then \`claw start\`.`,
-        };
+        return `WhatsApp did not connect within 120s (status: ${waStatus.status}). Run \`photon whatsapp connect\` manually, then \`claw start\`.`;
       }
     }
+
+    yield { emit: 'status', message: `WhatsApp connected (${waStatus.phone}) — subscribing to groups...` };
 
     this.running = true;
     await this.memory.set('running', true);
 
-    // Subscribe to each registered group
     this._subscribeAll();
 
-    // Heartbeat for health monitoring
     this.heartbeatTimer = setInterval(() => {
       this._heartbeat().catch(() => {});
     }, this.settings.heartbeatIntervalMs);
 
     const groupCount = Object.keys(this.registry).length;
     this.emit({ type: 'started', phone: waStatus.phone, groups: groupCount });
-    return { status: 'started', phone: waStatus.phone, groups: groupCount };
+    yield { emit: 'toast', message: `Pipeline started — ${groupCount} group(s) active`, type: 'success' };
+    return `Started. Phone: ${waStatus.phone}, groups: ${groupCount}`;
   }
 
   /**
