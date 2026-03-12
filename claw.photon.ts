@@ -1,4 +1,4 @@
-import { Photon, getBroker } from '@portel/photon-core';
+import { Photon } from '@portel/photon-core';
 
 /**
  * Claw — orchestrates WhatsApp ↔ Claude agent pipeline.
@@ -24,7 +24,8 @@ export default class Claw extends Photon {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private sessionMap: Record<string, string> = {}; // groupFolder → sessionId
   private lastHealth: { ok: boolean; whatsapp: string; runner: string; checkedAt: string } | null = null;
-  private messageSubscription: { unsubscribe(): void } | null = null;
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private autoResumeTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private whatsapp: any,
@@ -52,9 +53,9 @@ export default class Claw extends Photon {
         this.heartbeatTimer = old.heartbeatTimer;
         old.heartbeatTimer = null;
       }
-      if (old.messageSubscription) {
-        this.messageSubscription = old.messageSubscription;
-        old.messageSubscription = null;
+      if (old.pollTimer) {
+        this.pollTimer = old.pollTimer;
+        old.pollTimer = null;
       }
 
       this.emit({ type: 'hot_reload_transferred', running: this.running });
@@ -79,15 +80,14 @@ export default class Claw extends Photon {
           }
         }
       };
-      setTimeout(() => tryResume(), 2000);
+      this.autoResumeTimer = setTimeout(() => tryResume(), 2000);
     }
   }
 
   async onShutdown(ctx?: { reason?: string }): Promise<void> {
     if (ctx?.reason === 'hot-reload') return;
 
-    this.messageSubscription?.unsubscribe();
-    this.messageSubscription = null;
+    if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
     if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; }
     this.running = false;
   }
@@ -99,12 +99,40 @@ export default class Claw extends Photon {
   async start(): Promise<{ status: string; phone?: string; groups?: number }> {
     if (this.running) return { status: 'already running' };
 
-    const waStatus = await this.whatsapp.status();
+    // Wait for WhatsApp to connect — auto-connects on startup, may need QR scan.
+    // Timeout after 60 seconds with a clear message.
+    let waStatus = await this.whatsapp.status();
     if (waStatus.status !== 'connected') {
-      throw new Error(
-        `WhatsApp is not connected (status: ${waStatus.status}). ` +
-        `Run 'photon whatsapp connect' first to authenticate.`
-      );
+      if (waStatus.status === 'disconnected') {
+        try {
+          const connectResult = await this.whatsapp.connect();
+          if (connectResult.status === 'qr_pending') {
+            return {
+              status: 'qr_pending',
+              message: 'WhatsApp needs QR authentication. Run `photon whatsapp connect` to scan the QR code, then run `claw start` again.',
+            } as any;
+          }
+        } catch {
+          // connect() may fail transiently — fall through to polling
+        }
+      }
+
+      const maxWaitMs = 60_000;
+      const started = Date.now();
+      while (Date.now() - started < maxWaitMs) {
+        await new Promise(r => setTimeout(r, 3000));
+        waStatus = await this.whatsapp.status();
+        if (waStatus.status === 'connected') break;
+        const elapsed = Math.round((Date.now() - started) / 1000);
+        this.emit({ type: 'status', message: `Waiting for WhatsApp... (${elapsed}s, status: ${waStatus.status})` });
+      }
+
+      if (waStatus.status !== 'connected') {
+        return {
+          status: 'timeout',
+          message: `WhatsApp did not connect within 60s (status: ${waStatus.status}). Run \`photon whatsapp connect\` manually, then \`claw start\`.`,
+        } as any;
+      }
     }
 
     const groups = await this.router.groups();
@@ -112,15 +140,20 @@ export default class Claw extends Photon {
     this.running = true;
     await this.memory.set('running', true);
 
-    // Subscribe to WhatsApp messages via channel broker (event-driven, no polling)
-    const broker = getBroker();
-    this.messageSubscription = await broker.subscribe('whatsapp:messages', (msg) => {
+    // Poll WhatsApp instance directly for new messages
+    this.pollTimer = setInterval(async () => {
       if (!this.running) return;
-      const { chatJid, message } = msg.data;
-      this._handleMessage({ chatJid, message }).catch((err) => {
-        this.emit({ type: 'handle_error', chatJid, error: err.message });
-      });
-    });
+      try {
+        const messages = await this.whatsapp.pending();
+        for (const msg of messages) {
+          this._handleMessage(msg).catch((err) => {
+            this.emit({ type: 'handle_error', chatJid: msg.chatJid, error: err.message });
+          });
+        }
+      } catch (err: any) {
+        this.emit({ type: 'poll_error', error: err.message });
+      }
+    }, 1000);
 
     // Heartbeat for health monitoring
     this.heartbeatTimer = setInterval(() => {
@@ -135,10 +168,16 @@ export default class Claw extends Photon {
    * Stop the pipeline.
    */
   async stop(): Promise<{ status: string }> {
-    if (!this.running) return { status: 'not running' };
+    // Cancel pending autoResume even if not running yet (race with delayed resume)
+    if (this.autoResumeTimer) { clearTimeout(this.autoResumeTimer); this.autoResumeTimer = null; }
 
-    this.messageSubscription?.unsubscribe();
-    this.messageSubscription = null;
+    if (!this.running) {
+      // Still persist running=false to prevent autoResume on next restart
+      await this.memory.set('running', false);
+      return { status: 'not running' };
+    }
+
+    if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
     if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; }
     this.running = false;
     await this.memory.set('running', false);
