@@ -39,6 +39,7 @@ export default class WhatsApp extends Photon {
   private knownGroups: Record<string, string> = {}; // jid → name
   private _lastQR: string | null = null;
   private _pendingMessages: Array<{ chatJid: string; message: InboundMessage }> = [];
+  private _eventListeners: Map<string, Set<(data: any) => void>> = new Map();
 
   private get authDir(): string {
     const base = process.env.PHOTON_WHATSAPP_AUTHDIR
@@ -59,6 +60,7 @@ export default class WhatsApp extends Photon {
         this.knownGroups = old.knownGroups || {};
         this.outgoingQueue = old.outgoingQueue || [];
         this._pendingMessages = old._pendingMessages || [];
+        this._eventListeners = old._eventListeners || new Map();
         this._lastQR = old._lastQR || null;
         this.reconnectAttempts = 0;
 
@@ -269,6 +271,24 @@ export default class WhatsApp extends Photon {
   }
 
   /**
+   * Subscribe to events. Same pattern as EventEmitter.
+   * @internal
+   */
+  on(event: string, fn: (data: any) => void): void {
+    let listeners = this._eventListeners.get(event);
+    if (!listeners) { listeners = new Set(); this._eventListeners.set(event, listeners); }
+    listeners.add(fn);
+  }
+
+  /**
+   * Unsubscribe from events.
+   * @internal
+   */
+  off(event: string, fn: (data: any) => void): void {
+    this._eventListeners.get(event)?.delete(fn);
+  }
+
+  /**
    * Set typing indicator for a chat.
    * @param jid WhatsApp JID
    * @param typing Whether the bot is typing
@@ -377,6 +397,14 @@ export default class WhatsApp extends Photon {
         // Cap buffer to prevent unbounded growth
         if (this._pendingMessages.length > 1000) {
           this._pendingMessages.splice(0, this._pendingMessages.length - 1000);
+        }
+
+        // Notify direct listeners (e.g. claw via this.whatsapp.on('message', ...))
+        const listeners = this._eventListeners.get('message');
+        if (listeners) {
+          for (const fn of listeners) {
+            try { fn({ chatJid, message: inbound }); } catch { /* best-effort */ }
+          }
         }
 
         // Emit on channel — framework auto-prefixes with photon name ('whatsapp:messages')

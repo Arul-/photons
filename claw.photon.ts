@@ -24,7 +24,7 @@ export default class Claw extends Photon {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private sessionMap: Record<string, string> = {}; // groupFolder → sessionId
   private lastHealth: { ok: boolean; whatsapp: string; runner: string; checkedAt: string } | null = null;
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private _messageHandler: ((msg: any) => void) | null = null;
   private autoResumeTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
@@ -53,9 +53,9 @@ export default class Claw extends Photon {
         this.heartbeatTimer = old.heartbeatTimer;
         old.heartbeatTimer = null;
       }
-      if (old.pollTimer) {
-        this.pollTimer = old.pollTimer;
-        old.pollTimer = null;
+      if (old._messageHandler) {
+        this._messageHandler = old._messageHandler;
+        old._messageHandler = null;
       }
 
       this.emit({ type: 'hot_reload_transferred', running: this.running });
@@ -87,7 +87,7 @@ export default class Claw extends Photon {
   async onShutdown(ctx?: { reason?: string }): Promise<void> {
     if (ctx?.reason === 'hot-reload') return;
 
-    if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
+    if (this._messageHandler) { this.whatsapp.off('message', this._messageHandler); this._messageHandler = null; }
     if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; }
     this.running = false;
   }
@@ -140,20 +140,14 @@ export default class Claw extends Photon {
     this.running = true;
     await this.memory.set('running', true);
 
-    // Poll WhatsApp instance directly for new messages
-    this.pollTimer = setInterval(async () => {
+    // Subscribe to WhatsApp messages directly via .on()
+    this._messageHandler = (msg) => {
       if (!this.running) return;
-      try {
-        const messages = await this.whatsapp.pending();
-        for (const msg of messages) {
-          this._handleMessage(msg).catch((err) => {
-            this.emit({ type: 'handle_error', chatJid: msg.chatJid, error: err.message });
-          });
-        }
-      } catch (err: any) {
-        this.emit({ type: 'poll_error', error: err.message });
-      }
-    }, 1000);
+      this._handleMessage(msg).catch((err) => {
+        this.emit({ type: 'handle_error', chatJid: msg.chatJid, error: err.message });
+      });
+    };
+    this.whatsapp.on('message', this._messageHandler);
 
     // Heartbeat for health monitoring
     this.heartbeatTimer = setInterval(() => {
@@ -177,7 +171,7 @@ export default class Claw extends Photon {
       return { status: 'not running' };
     }
 
-    if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
+    if (this._messageHandler) { this.whatsapp.off('message', this._messageHandler); this._messageHandler = null; }
     if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; }
     this.running = false;
     await this.memory.set('running', false);
