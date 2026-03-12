@@ -65,8 +65,13 @@ export default class WhatsApp extends Photon {
     resolvedJid?: string; // cached JID from group name lookup
   }> = [];
 
-  constructor(private authDir: string = path.join(os.homedir(), '.photon', 'whatsapp', 'auth')) {
+  /** Pass a custom auth directory, or leave empty to use ~/.photon/whatsapp/auth */
+  constructor(private _authDir: string = '') {
     super();
+  }
+
+  private get authDir(): string {
+    return this._authDir || path.join(os.homedir(), '.photon', 'whatsapp', 'auth');
   }
 
   private get _logger() {
