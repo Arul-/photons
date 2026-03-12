@@ -15,14 +15,15 @@ import makeWASocket, {
 
 import { Photon } from '@portel/photon-core';
 
-const logger = pino({ level: process.env.PHOTON_WA_DEBUG ? 'debug' : 'silent' });
+// Logger is initialized lazily in _makeLogger() to respect the settings.debug flag
+const silentLogger = pino({ level: 'silent' });
+const debugLogger = pino({ level: 'debug' });
 
 /** Max age for queued messages before they're dropped on flush (1 hour) */
 const MESSAGE_TTL_MS = 60 * 60 * 1000;
 
 /** Directory for downloaded media files */
 const MEDIA_DIR = path.join(os.homedir(), '.photon', 'whatsapp', 'media');
-fs.mkdirSync(MEDIA_DIR, { recursive: true });
 
 /**
  * WhatsApp — live WhatsApp connection via Baileys.
@@ -37,6 +38,13 @@ fs.mkdirSync(MEDIA_DIR, { recursive: true });
  * @dependencies @whiskeysockets/baileys@^7.0.0-rc.9, pino@^9.0.0
  */
 export default class WhatsApp extends Photon {
+  protected settings = {
+    /** Enable verbose debug logging */
+    debug: false,
+    /** Max reconnect attempts before giving up */
+    maxReconnectAttempts: 10,
+  };
+
   private sock: WASocket | null = null;
   private connected = false;
   private qrPending = false;
@@ -57,14 +65,17 @@ export default class WhatsApp extends Photon {
     resolvedJid?: string; // cached JID from group name lookup
   }> = [];
 
-  private get authDir(): string {
-    const base = process.env.PHOTON_WHATSAPP_AUTHDIR
-      || path.join(os.homedir(), '.photon', 'whatsapp', 'auth');
-    fs.mkdirSync(base, { recursive: true });
-    return base;
+  constructor(private authDir: string = path.join(os.homedir(), '.photon', 'whatsapp', 'auth')) {
+    super();
+  }
+
+  private get _logger() {
+    return this.settings.debug ? debugLogger : silentLogger;
   }
 
   async onInitialize(ctx?: { reason?: string; oldInstance?: any }): Promise<void> {
+    fs.mkdirSync(MEDIA_DIR, { recursive: true });
+    fs.mkdirSync(this.authDir, { recursive: true });
     // Hot-reload: take over the socket from the old instance instead of reconnecting.
     // This avoids destroying the WhatsApp session (which could trigger 440 bans).
     if (ctx?.reason === 'hot-reload' && ctx.oldInstance) {
@@ -134,6 +145,8 @@ export default class WhatsApp extends Photon {
    * If not, returns a QR code to scan. The connection completes
    * asynchronously — call status() to check when it's ready.
    *
+   * @title Connect to WhatsApp
+   * @openWorld
    * @format qr
    */
   async connect(): Promise<{
@@ -162,11 +175,11 @@ export default class WhatsApp extends Photon {
         version,
         auth: {
           creds: state.creds,
-          keys: makeCacheableSignalKeyStore(state.keys, logger),
+          keys: makeCacheableSignalKeyStore(state.keys, this._logger),
         },
         printQRInTerminal: false,
         browser: Browsers.macOS('Chrome'),
-        logger,
+        logger: this._logger,
       });
 
       // Wire persistent event handlers (messages, creds, reconnect)
@@ -227,18 +240,24 @@ export default class WhatsApp extends Photon {
 
   /**
    * Disconnect from WhatsApp gracefully.
+   *
+   * @title Disconnect
+   * @destructive
+   * @openWorld
    */
-  async disconnect(): Promise<{ status: string }> {
+  async disconnect(): Promise<void> {
     this.connected = false;
     this.sock?.end(undefined);
     this.sock = null;
     this.emit({ type: 'disconnected' });
-    return { status: 'disconnected' };
   }
 
   /**
    * Send a message to a WhatsApp JID.
    * Queues automatically if currently disconnected.
+   *
+   * @title Send Message
+   * @openWorld
    * @param jid WhatsApp JID — group (@g.us) or contact (@s.whatsapp.net) {@example "12345678901@s.whatsapp.net"}
    * @param text Message text to send
    */
@@ -264,61 +283,58 @@ export default class WhatsApp extends Photon {
   /**
    * Reply to a specific message in a WhatsApp chat.
    * The reply appears threaded/quoted in WhatsApp.
+   *
+   * @title Reply to Message
+   * @openWorld
    * @param jid WhatsApp JID — the chat to reply in
    * @param text Reply text
    * @param quotedId Message ID to reply to (from inbound message's messageId field)
    */
-  async reply(params: { jid: string; text: string; quotedId: string }): Promise<{ sent: boolean }> {
+  async reply(params: { jid: string; text: string; quotedId: string }): Promise<void> {
     if (!this.connected || !this.sock) {
       throw new Error('Not connected. Call connect() first.');
     }
 
     const { jid, quotedId } = params;
     const text = markdownToWa(params.text);
-    try {
-      await this.sock.sendMessage(jid, { text }, {
-        quoted: {
-          key: { remoteJid: jid, id: quotedId },
-          message: { conversation: '' },
-        } as any,
-      });
-      return { sent: true };
-    } catch (err: any) {
-      this.emit({ type: 'error', source: 'reply', error: err.message });
-      throw err;
-    }
+    await this.sock.sendMessage(jid, { text }, {
+      quoted: {
+        key: { remoteJid: jid, id: quotedId },
+        message: { conversation: '' },
+      } as any,
+    });
   }
 
   /**
    * React to a message with an emoji.
    * Send an empty emoji string to remove a reaction.
+   *
+   * @title React to Message
+   * @openWorld
    * @param jid WhatsApp JID — the chat containing the message
    * @param messageId Message ID to react to
    * @param emoji Emoji to react with (e.g. "👍"), or empty string to remove {@example "👍"}
    */
-  async react(params: { jid: string; messageId: string; emoji: string }): Promise<{ sent: boolean }> {
+  async react(params: { jid: string; messageId: string; emoji: string }): Promise<void> {
     if (!this.connected || !this.sock) {
       throw new Error('Not connected. Call connect() first.');
     }
 
     const { jid, messageId, emoji } = params;
-    try {
-      await this.sock.sendMessage(jid, {
-        react: {
-          text: emoji,
-          key: { remoteJid: jid, id: messageId },
-        },
-      });
-      return { sent: true };
-    } catch (err: any) {
-      this.emit({ type: 'error', source: 'react', error: err.message });
-      throw err;
-    }
+    await this.sock.sendMessage(jid, {
+      react: {
+        text: emoji,
+        key: { remoteJid: jid, id: messageId },
+      },
+    });
   }
 
   /**
    * Send media (image, video, audio, or document) to a WhatsApp chat.
    * Accepts a URL or local file path as the source.
+   *
+   * @title Send Media
+   * @openWorld
    * @param jid WhatsApp JID — group or contact
    * @param url URL or local file path of the media
    * @param type Media type {@choice image, video, audio, document}
@@ -331,7 +347,7 @@ export default class WhatsApp extends Photon {
     type: 'image' | 'video' | 'audio' | 'document';
     caption?: string;
     filename?: string;
-  }): Promise<{ sent: boolean }> {
+  }): Promise<void> {
     if (!this.connected || !this.sock) {
       throw new Error('Not connected. Call connect() first.');
     }
@@ -340,7 +356,7 @@ export default class WhatsApp extends Photon {
 
     // Determine if source is a local file or a URL
     const isLocal = !url.startsWith('http://') && !url.startsWith('https://');
-    const source = isLocal ? fs.readFileSync(url) : { url };
+    const source = isLocal ? await fs.promises.readFile(url) : { url };
 
     const msgPayload: Record<string, any> = {};
     switch (type) {
@@ -364,19 +380,16 @@ export default class WhatsApp extends Photon {
         break;
     }
 
-    try {
-      await this.sock.sendMessage(jid, msgPayload);
-      return { sent: true };
-    } catch (err: any) {
-      this.emit({ type: 'error', source: 'media', error: err.message });
-      throw err;
-    }
+    await this.sock.sendMessage(jid, msgPayload);
   }
 
   /**
    * Return the current connection status.
+   *
+   * @title Status
    * @readOnly
-   * @format kv
+   * @closedWorld
+   * @format card
    */
   async status(): Promise<{
     status: 'connected' | 'disconnected' | 'qr_pending';
@@ -396,7 +409,10 @@ export default class WhatsApp extends Photon {
 
   /**
    * List all known WhatsApp groups.
+   *
+   * @title List Groups
    * @readOnly
+   * @openWorld
    * @format table
    */
   async groups(): Promise<Array<{ jid: string; name: string }>> {
@@ -421,7 +437,9 @@ export default class WhatsApp extends Photon {
   /**
    * Return and clear buffered inbound messages since last call.
    * Used by orchestrators (e.g. claw) to poll for new messages.
-   * @readOnly
+   *
+   * @title Pending Messages
+   * @closedWorld
    * @format json
    */
   async pending(): Promise<Array<{ chatJid: string; message: InboundMessage }>> {
@@ -431,8 +449,11 @@ export default class WhatsApp extends Photon {
 
   /**
    * Generate a group invite link.
-   * @param jid Group JID
+   *
+   * @title Group Invite Link
    * @readOnly
+   * @openWorld
+   * @param jid Group JID
    */
   async invite(params: { jid: string }): Promise<{ link: string }> {
     if (!this.connected || !this.sock) {
@@ -449,9 +470,12 @@ export default class WhatsApp extends Photon {
 
   /**
    * List members of a group with their roles.
-   * @param jid Group JID
+   *
+   * @title Group Members
    * @readOnly
+   * @openWorld
    * @format table
+   * @param jid Group JID
    */
   async members(params: { jid: string }): Promise<Array<{ jid: string; admin: string }>> {
     if (!this.connected || !this.sock) {
@@ -471,28 +495,25 @@ export default class WhatsApp extends Photon {
 
   /**
    * Group admin operations: add, remove, promote, or demote members.
+   *
+   * @title Group Admin
+   * @destructive
+   * @openWorld
    * @param jid Group JID
    * @param action Admin action to perform {@choice add, remove, promote, demote}
    * @param members Array of member JIDs to act on
-   * @destructive
    */
   async admin(params: {
     jid: string;
     action: 'add' | 'remove' | 'promote' | 'demote';
     members: string[];
-  }): Promise<{ done: boolean }> {
+  }): Promise<void> {
     if (!this.connected || !this.sock) {
       throw new Error('Not connected. Call connect() first.');
     }
 
     const { jid, action, members } = params;
-    try {
-      await this.sock.groupParticipantsUpdate(jid, members, action);
-      return { done: true };
-    } catch (err: any) {
-      this.emit({ type: 'error', source: 'admin', error: err.message });
-      throw err;
-    }
+    await this.sock.groupParticipantsUpdate(jid, members, action);
   }
 
   /**
@@ -534,8 +555,11 @@ export default class WhatsApp extends Photon {
 
   /**
    * Set typing indicator for a chat.
-   * @param jid WhatsApp JID
-   * @param typing Whether the bot is typing
+   *
+   * @title Set Typing Indicator
+   * @openWorld
+   * @param jid WhatsApp JID of the chat
+   * @param typing True to show composing, false to clear
    */
   async typing(params: { jid: string; typing: boolean }): Promise<void> {
     if (!this.connected || !this.sock) return;
@@ -567,11 +591,11 @@ export default class WhatsApp extends Photon {
     }
 
     const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
-      logger,
+      logger: this._logger,
       reuploadRequest: this.sock!.updateMediaMessage,
     });
 
-    fs.writeFileSync(filePath, buffer);
+    await fs.promises.writeFile(filePath, buffer);
     inbound.filePath = filePath;
   }
 
@@ -617,7 +641,7 @@ export default class WhatsApp extends Photon {
         const isRateLimited = reason === 503;
 
         // Cap reconnect attempts to avoid infinite retry storms
-        if (this.reconnectAttempts >= 10) {
+        if (this.reconnectAttempts >= this.settings.maxReconnectAttempts) {
           this.emit({ type: 'reconnect_exhausted', attempts: this.reconnectAttempts });
           this.reconnectAttempts = 0;
           return;
@@ -731,7 +755,7 @@ export default class WhatsApp extends Photon {
   ): InboundMessage {
     const m = message;
     const result: InboundMessage = {
-      id: base.messageId,
+      messageId: base.messageId,
       chatJid: base.chatJid,
       sender: base.sender,
       senderName: base.senderName,
@@ -739,7 +763,6 @@ export default class WhatsApp extends Photon {
       timestamp: base.timestamp,
       fromMe: base.fromMe,
       type: 'unknown',
-      messageId: base.messageId,
     };
 
     // Text messages
@@ -865,11 +888,11 @@ export default class WhatsApp extends Photon {
       version,
       auth: {
         creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, logger),
+        keys: makeCacheableSignalKeyStore(state.keys, this._logger),
       },
       printQRInTerminal: false,
       browser: Browsers.macOS('Chrome'),
-      logger,
+      logger: this._logger,
     });
 
     this._wireSocketEvents(saveCreds);
@@ -923,7 +946,7 @@ export default class WhatsApp extends Photon {
 // ─── Types ─────────────────────────────────────────────────────────
 
 interface InboundMessage {
-  id: string;
+  messageId: string;
   chatJid: string;
   sender: string;
   senderName: string;
@@ -931,7 +954,6 @@ interface InboundMessage {
   timestamp: string;
   fromMe: boolean;
   type: 'text' | 'image' | 'video' | 'audio' | 'document' | 'sticker' | 'reaction' | 'location' | 'contact' | 'poll' | 'unknown';
-  messageId: string;
   media?: { mimetype: string; caption?: string; filename?: string; seconds?: number };
   reaction?: { emoji: string; targetMessageId: string };
   location?: { lat: number; lng: number; name?: string };
