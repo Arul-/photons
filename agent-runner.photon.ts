@@ -21,7 +21,6 @@ import { Photon } from '@portel/photon-core';
 export default class AgentRunner extends Photon {
   private activeRuns = new Map<string, RunState>();
   private queue: QueuedRun[] = [];
-  private baseDir = '';
 
   protected settings = {
     /** Base directory for group folders. Each group gets a subfolder here. */
@@ -36,14 +35,12 @@ export default class AgentRunner extends Photon {
     addDirs: '',
   };
 
-  async onInitialize(): Promise<void> {
-    this.baseDir = this.settings.baseDir;
-    fs.mkdirSync(this.baseDir, { recursive: true });
-  }
-
   /**
    * Run a prompt against a group's context using Claude.
    * Returns the agent's text response.
+   *
+   * @title Run Agent
+   * @openWorld
    * @param groupFolder Group folder name {@example "dev-team"}
    * @param prompt The prompt to send to Claude {@example "Summarise the discussion"}
    * @param chatJid Chat JID for result routing (passed through in events)
@@ -82,8 +79,11 @@ export default class AgentRunner extends Photon {
 
   /**
    * Check what's currently running and queued.
+   *
+   * @title Status
    * @readOnly
-   * @format json
+   * @closedWorld
+   * @format card
    */
   async status(): Promise<{
     active: Array<{ groupFolder: string; startedAt: string; pid: number | null }>;
@@ -103,11 +103,15 @@ export default class AgentRunner extends Photon {
 
   /**
    * Kill a running agent for a group.
+   *
+   * @title Kill Agent
+   * @destructive
+   * @closedWorld
    * @param groupFolder Group folder to kill
    */
-  async kill(params: { groupFolder: string }): Promise<{ killed: boolean }> {
+  async kill(params: { groupFolder: string }): Promise<void> {
     const state = this.activeRuns.get(params.groupFolder);
-    if (!state?.proc) return { killed: false };
+    if (!state?.proc) throw new Error(`No active run for group: ${params.groupFolder}`);
 
     state.proc.kill('SIGTERM');
     // Give it 5s, then force kill
@@ -116,68 +120,64 @@ export default class AgentRunner extends Photon {
         state.proc.kill('SIGKILL');
       }
     }, 5000);
-
-    return { killed: true };
-  }
-
-  /**
-   * Set the maximum number of concurrent agent runs.
-   * @param max Maximum concurrent runs {@example 5}
-   */
-  async concurrency(params: { max: number }): Promise<{ maxConcurrent: number }> {
-    this.settings.maxConcurrent = Math.max(1, params.max);
-    this._drainQueue();
-    return { maxConcurrent: this.settings.maxConcurrent };
   }
 
   /**
    * List all group folders with their CLAUDE.md content summary.
+   *
+   * @title List Groups
    * @readOnly
+   * @closedWorld
    * @format table
    */
   async groups(): Promise<Array<{ folder: string; hasClaudeMd: boolean; lastRun: string | null }>> {
-    if (!fs.existsSync(this.baseDir)) return [];
+    const baseDir = this.settings.baseDir;
+    try {
+      await fs.promises.access(baseDir);
+    } catch {
+      return [];
+    }
 
-    const folders = fs.readdirSync(this.baseDir, { withFileTypes: true })
-      .filter(d => d.isDirectory())
-      .map(d => {
-        const claudeMd = path.join(this.baseDir, d.name, 'CLAUDE.md');
-        const logsDir = path.join(this.baseDir, d.name, 'logs');
+    const entries = await fs.promises.readdir(baseDir, { withFileTypes: true });
+    const results = await Promise.all(
+      entries.filter(d => d.isDirectory()).map(async d => {
+        const claudeMd = path.join(baseDir, d.name, 'CLAUDE.md');
+        const logsDir = path.join(baseDir, d.name, 'logs');
         let lastRun: string | null = null;
-        if (fs.existsSync(logsDir)) {
-          const logs = fs.readdirSync(logsDir).sort().reverse();
+        try {
+          const logs = (await fs.promises.readdir(logsDir)).sort().reverse();
           if (logs.length > 0) {
-            const stat = fs.statSync(path.join(logsDir, logs[0]));
+            const stat = await fs.promises.stat(path.join(logsDir, logs[0]));
             lastRun = stat.mtime.toISOString();
           }
-        }
-        return {
-          folder: d.name,
-          hasClaudeMd: fs.existsSync(claudeMd),
-          lastRun,
-        };
-      });
+        } catch { /* no logs dir yet */ }
+        let hasClaudeMd = false;
+        try { await fs.promises.access(claudeMd); hasClaudeMd = true; } catch { /* missing */ }
+        return { folder: d.name, hasClaudeMd, lastRun };
+      })
+    );
 
-    return folders;
+    return results;
   }
 
   // ─── Internal ──────────────────────────────────────────────────
 
   private _ensureGroupDir(groupFolder: string): string {
-    const groupDir = path.isAbsolute(groupFolder) ? groupFolder : path.join(this.baseDir, groupFolder);
+    const groupDir = path.isAbsolute(groupFolder) ? groupFolder : path.join(this.settings.baseDir, groupFolder);
     fs.mkdirSync(groupDir, { recursive: true });
     fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
 
     // Create CLAUDE.md if it doesn't exist
     const claudeMd = path.join(groupDir, 'CLAUDE.md');
     if (!fs.existsSync(claudeMd)) {
-      fs.writeFileSync(claudeMd, [
+      const content = [
         `# ${groupFolder}`,
         '',
         'This is the memory file for this group. The agent will read this on every invocation.',
         'Add persistent context, rules, or preferences here.',
         '',
-      ].join('\n'));
+      ].join('\n');
+      fs.promises.writeFile(claudeMd, content).catch(() => { /* non-fatal */ });
     }
 
     return groupDir;
@@ -211,15 +211,15 @@ export default class AgentRunner extends Photon {
         result = await this._spawnClaude(groupDir, groupFolder, prompt, undefined, systemPrompt, runState, addDirs);
       }
 
-      // Log the run
+      // Log the run (non-blocking)
       const logFile = path.join(groupDir, 'logs', `${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
-      fs.writeFileSync(logFile, JSON.stringify({
+      fs.promises.writeFile(logFile, JSON.stringify({
         prompt: prompt.slice(0, 500),
         result: result.output?.slice(0, 1000),
         status: result.status,
         duration: result.duration,
         timestamp: startedAt,
-      }, null, 2));
+      }, null, 2)).catch(() => { /* log failure is non-fatal */ });
 
       this.emit({
         type: 'completed',
