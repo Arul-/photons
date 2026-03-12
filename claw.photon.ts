@@ -1,4 +1,4 @@
-import { Photon } from '@portel/photon-core';
+import { Photon, getBroker } from '@portel/photon-core';
 
 /**
  * Claw — orchestrates WhatsApp ↔ Claude agent pipeline.
@@ -8,25 +8,33 @@ import { Photon } from '@portel/photon-core';
  *
  * Prerequisites:
  *   1. Run `photon whatsapp connect` once to authenticate
- *   2. Register groups via `photon claw register --jid ... --name ... --folder ... --trigger ...`
+ *   2. Register groups via `photon claw register --group "Group Name" --folder ... --trigger ...`
  *   3. Run `photon claw start` to begin the pipeline
  *
- * @version 1.0.0
+ * @version 2.0.0
  * @icon 🦞
  * @tags orchestrator, whatsapp, agent, claw
  * @stateful
+ * @photon whatsapp ./whatsapp.photon.ts
+ * @photon router ./message-router.photon.ts
+ * @photon runner ./agent-runner.photon.ts
  */
 export default class Claw extends Photon {
   private running = false;
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-  private processing = false;
   private sessionMap: Record<string, string> = {}; // groupFolder → sessionId
   private lastHealth: { ok: boolean; whatsapp: string; runner: string; checkedAt: string } | null = null;
+  private messageSubscription: { unsubscribe(): void } | null = null;
+
+  constructor(
+    private whatsapp: any,
+    private router: any,
+    private runner: any,
+  ) {
+    super();
+  }
 
   protected settings = {
-    /** Message polling interval in milliseconds */
-    pollIntervalMs: 2000,
     /** Heartbeat interval in milliseconds (health checks) */
     heartbeatIntervalMs: 30000,
     /** Auto-resume pipeline after daemon restart */
@@ -34,22 +42,19 @@ export default class Claw extends Photon {
   };
 
   async onInitialize(ctx?: { reason?: string; oldInstance?: any }): Promise<void> {
-    // Hot-reload: transfer running state from old instance
     if (ctx?.reason === 'hot-reload' && ctx.oldInstance) {
       const old = ctx.oldInstance;
       this.running = old.running || false;
       this.sessionMap = old.sessionMap || {};
       this.lastHealth = old.lastHealth || null;
-      this.processing = old.processing || false;
 
-      // Transfer timers — null them on old instance so they aren't double-cleared
-      if (old.pollTimer) {
-        this.pollTimer = old.pollTimer;
-        old.pollTimer = null;
-      }
       if (old.heartbeatTimer) {
         this.heartbeatTimer = old.heartbeatTimer;
         old.heartbeatTimer = null;
+      }
+      if (old.messageSubscription) {
+        this.messageSubscription = old.messageSubscription;
+        old.messageSubscription = null;
       }
 
       this.emit({ type: 'hot_reload_transferred', running: this.running });
@@ -60,8 +65,6 @@ export default class Claw extends Photon {
     const saved = await this.memory.get<Record<string, string>>('sessionMap');
     if (saved) this.sessionMap = saved;
 
-    // Auto-resume if pipeline was running before daemon restart.
-    // Wait briefly for WhatsApp to auto-connect from saved credentials.
     const wasRunning = await this.memory.get<boolean>('running');
     if (wasRunning && this.settings.autoResume) {
       const tryResume = async (attempts = 0): Promise<void> => {
@@ -81,45 +84,22 @@ export default class Claw extends Photon {
   }
 
   async onShutdown(ctx?: { reason?: string }): Promise<void> {
-    // During hot-reload, DON'T clear timers — the new instance will take them over
-    if (ctx?.reason === 'hot-reload') {
-      return;
-    }
+    if (ctx?.reason === 'hot-reload') return;
 
-    if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
+    this.messageSubscription?.unsubscribe();
+    this.messageSubscription = null;
     if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; }
     this.running = false;
   }
 
-  // Cross-photon calls via this.call()
-  private bridge = {
-    connect: () => this.call('whatsapp.connect', {}),
-    disconnect: () => this.call('whatsapp.disconnect', {}),
-    send: (params: { jid: string; text: string }) => this.call('whatsapp.send', params),
-    status: () => this.call('whatsapp.status', {}),
-    pending: () => this.call('whatsapp.pending', {}),
-    typing: (params: { jid: string; typing: boolean }) => this.call('whatsapp.typing', params),
-  };
-  private router = {
-    register: (params: any) => this.call('message-router.register', params),
-    unregister: (params: any) => this.call('message-router.unregister', params),
-    route: (params: any) => this.call('message-router.route', params),
-    groups: () => this.call('message-router.groups', {}),
-  };
-  private runner = {
-    run: (params: any) => this.call('agent-runner.run', params),
-    status: () => this.call('agent-runner.status', {}),
-  };
-
   /**
-   * Start the pipeline: verify WhatsApp connection, begin polling for messages.
+   * Start the pipeline: verify WhatsApp connection, subscribe to messages.
    * WhatsApp must be connected first via `photon whatsapp connect`.
    */
   async start(): Promise<{ status: string; phone?: string; groups?: number }> {
     if (this.running) return { status: 'already running' };
 
-    // 1. Check WhatsApp connection
-    const waStatus = await this.bridge.status();
+    const waStatus = await this.whatsapp.status();
     if (waStatus.status !== 'connected') {
       throw new Error(
         `WhatsApp is not connected (status: ${waStatus.status}). ` +
@@ -127,29 +107,28 @@ export default class Claw extends Photon {
       );
     }
 
-    // 2. Check we have registered groups
     const groups = await this.router.groups();
 
-    // 3. Start polling for messages
     this.running = true;
     await this.memory.set('running', true);
-    this.pollTimer = setInterval(() => {
-      this._pollMessages().catch((err) => {
-        this.emit({ type: 'poll_error', error: err.message });
-      });
-    }, this.settings.pollIntervalMs);
 
-    // 4. Start heartbeat for health monitoring and recovery
+    // Subscribe to WhatsApp messages via channel broker (event-driven, no polling)
+    const broker = getBroker();
+    this.messageSubscription = await broker.subscribe('whatsapp:messages', (msg) => {
+      if (!this.running) return;
+      const { chatJid, message } = msg.data;
+      this._handleMessage({ chatJid, message }).catch((err) => {
+        this.emit({ type: 'handle_error', chatJid, error: err.message });
+      });
+    });
+
+    // Heartbeat for health monitoring
     this.heartbeatTimer = setInterval(() => {
       this._heartbeat().catch(() => {});
     }, this.settings.heartbeatIntervalMs);
 
     this.emit({ type: 'started', phone: waStatus.phone, groups: groups.length });
-    return {
-      status: 'started',
-      phone: waStatus.phone,
-      groups: groups.length,
-    };
+    return { status: 'started', phone: waStatus.phone, groups: groups.length };
   }
 
   /**
@@ -158,14 +137,9 @@ export default class Claw extends Photon {
   async stop(): Promise<{ status: string }> {
     if (!this.running) return { status: 'not running' };
 
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer);
-      this.pollTimer = null;
-    }
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = null;
-    }
+    this.messageSubscription?.unsubscribe();
+    this.messageSubscription = null;
+    if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; }
     this.running = false;
     await this.memory.set('running', false);
     await this.memory.set('sessionMap', this.sessionMap);
@@ -176,34 +150,76 @@ export default class Claw extends Photon {
 
   /**
    * Register a WhatsApp group for agent routing.
-   * @param jid WhatsApp JID {@example "123456789@g.us"}
-   * @param name Display name {@example "Dev Team"}
-   * @param folder Group folder name for agent context {@example "dev-team"}
+   * Fuzzy-matches the group name from your WhatsApp groups.
+   * @param group WhatsApp group name or partial match {@example "Learn CS"}
+   * @param folder Group folder name for agent context {@example "learn-cs"}
    * @param trigger Trigger pattern {@example "@bot"}
    * @param requiresTrigger Only route messages with trigger (default: true)
    */
   async register(params: {
-    jid: string;
-    name: string;
+    group: string;
     folder: string;
     trigger: string;
     requiresTrigger?: boolean;
   }): Promise<any> {
-    return this.router.register(params);
+    const groups = await this.whatsapp.groups();
+    const query = params.group.toLowerCase();
+    const match = groups.find((g: any) =>
+      g.name.toLowerCase().includes(query) ||
+      g.jid === params.group
+    );
+    if (!match) {
+      throw new Error(
+        `No group matching "${params.group}". ` +
+        `Run 'photon whatsapp groups' to see available groups.`
+      );
+    }
+
+    return this.router.register({
+      jid: match.jid,
+      name: match.name,
+      folder: params.folder,
+      trigger: params.trigger,
+      requiresTrigger: params.requiresTrigger,
+    });
   }
 
   /**
    * Remove a group from routing.
-   * @param jid WhatsApp JID to unregister {@example "123456789@g.us"}
+   * @param group WhatsApp group name or JID to unregister {@example "Learn CS"}
    */
-  async unregister(params: { jid: string }): Promise<any> {
-    return this.router.unregister(params);
+  async unregister(params: { group: string }): Promise<any> {
+    const groups = await this.whatsapp.groups();
+    const query = params.group.toLowerCase();
+    const match = groups.find((g: any) =>
+      g.name.toLowerCase().includes(query) ||
+      g.jid === params.group
+    );
+    if (!match) throw new Error(`No group matching "${params.group}"`);
+    return this.router.unregister({ jid: match.jid });
+  }
+
+  /**
+   * List available WhatsApp groups for registration.
+   * @readOnly
+   * @format table
+   */
+  async groups(): Promise<Array<{ jid: string; name: string; registered: boolean }>> {
+    const waGroups = await this.whatsapp.groups();
+    const registered = await this.router.groups();
+    const registeredJids = new Set(registered.map((g: any) => g.jid));
+
+    return waGroups.map((g: any) => ({
+      jid: g.jid,
+      name: g.name,
+      registered: registeredJids.has(g.jid),
+    }));
   }
 
   /**
    * Show latest health check result.
    * @readOnly
-   * @format json
+   * @format kv
    */
   async health(): Promise<{
     ok: boolean;
@@ -215,10 +231,7 @@ export default class Claw extends Photon {
     if (!this.running) {
       return { ok: false, running: false, whatsapp: 'unknown', runner: 'unknown', checkedAt: null };
     }
-    // Run a fresh check if no cached result
-    if (!this.lastHealth) {
-      await this._heartbeat();
-    }
+    if (!this.lastHealth) await this._heartbeat();
     return {
       ok: this.lastHealth?.ok ?? false,
       running: this.running,
@@ -231,7 +244,7 @@ export default class Claw extends Photon {
   /**
    * Show pipeline status.
    * @readOnly
-   * @format json
+   * @format kv
    */
   async status(): Promise<{
     running: boolean;
@@ -243,13 +256,13 @@ export default class Claw extends Photon {
       try { return await fn(); } catch { return fallback; }
     };
 
-    const [whatsapp, runnerStatus, groups] = await Promise.all([
-      safe(() => this.bridge.status(), { status: 'unknown' }),
+    const [whatsapp, runnerStatus, routerGroups] = await Promise.all([
+      safe(() => this.whatsapp.status(), { status: 'unknown' }),
       safe(() => this.runner.status(), { active: [], queued: 0 }),
       safe(() => this.router.groups(), []),
     ]);
 
-    return { running: this.running, whatsapp, runner: runnerStatus, groups };
+    return { running: this.running, whatsapp, runner: runnerStatus, groups: routerGroups };
   }
 
   // ─── Internal ──────────────────────────────────────────────────
@@ -262,57 +275,29 @@ export default class Claw extends Photon {
     let runnerStatus = 'unknown';
     let ok = true;
 
-    // Check WhatsApp
     try {
-      const wa = await this.bridge.status();
+      const wa = await this.whatsapp.status();
       waStatus = wa.status;
       if (wa.status !== 'connected') {
         ok = false;
         this.emit({ type: 'heartbeat_warn', component: 'whatsapp', status: wa.status });
-        // Attempt reconnect
-        this.bridge.connect().catch(() => {});
+        this.whatsapp.connect().catch(() => {});
       }
     } catch {
       ok = false;
       waStatus = 'unreachable';
     }
 
-    // Check agent runner
     try {
-      const runner = await this.runner.status();
-      runnerStatus = `active:${runner.active?.length ?? 0},queued:${runner.queued ?? 0}`;
+      const r = await this.runner.status();
+      runnerStatus = `active:${r.active?.length ?? 0},queued:${r.queued ?? 0}`;
     } catch {
       ok = false;
       runnerStatus = 'unreachable';
     }
 
     this.lastHealth = { ok, whatsapp: waStatus, runner: runnerStatus, checkedAt };
-
-    this.emit({
-      type: 'heartbeat',
-      ok,
-      whatsapp: waStatus,
-      runner: runnerStatus,
-      checkedAt,
-    });
-  }
-
-  private async _pollMessages(): Promise<void> {
-    if (!this.running || this.processing) return;
-    this.processing = true;
-
-    try {
-      const messages: Array<{ chatJid: string; message: any }> = await this.bridge.pending();
-      if (!messages || messages.length === 0) return;
-
-      for (const event of messages) {
-        await this._handleMessage(event).catch((err) => {
-          this.emit({ type: 'handle_error', chatJid: event.chatJid, error: err.message });
-        });
-      }
-    } finally {
-      this.processing = false;
-    }
+    this.emit({ type: 'heartbeat', ok, whatsapp: waStatus, runner: runnerStatus, checkedAt });
   }
 
   private async _handleMessage(event: {
@@ -321,7 +306,6 @@ export default class Claw extends Photon {
   }): Promise<void> {
     const msg = event.message;
 
-    // Route the message
     const decision = await this.router.route({
       jid: event.chatJid,
       from: msg.sender,
@@ -340,10 +324,8 @@ export default class Claw extends Photon {
       textPreview: msg.content.slice(0, 80),
     });
 
-    // Show typing indicator
-    await this.bridge.typing({ jid: event.chatJid, typing: true }).catch(() => {});
+    await this.whatsapp.typing({ jid: event.chatJid, typing: true }).catch(() => {});
 
-    // Execute via agent runner
     const result = await this.runner.run({
       groupFolder: decision.folder,
       prompt: decision.formattedContext,
@@ -351,15 +333,13 @@ export default class Claw extends Photon {
       sessionId: this.sessionMap[decision.folder],
     });
 
-    // Track session for continuity
     if (result.sessionId) {
       this.sessionMap[decision.folder] = result.sessionId;
       await this.memory.set('sessionMap', this.sessionMap);
     }
 
-    // Send reply
     if (result.status === 'success' && result.output) {
-      await this.bridge.send({ jid: event.chatJid, text: result.output });
+      await this.whatsapp.send({ jid: event.chatJid, text: result.output });
       this.emit({
         type: 'replied',
         jid: event.chatJid,
@@ -368,12 +348,7 @@ export default class Claw extends Photon {
         outputLength: result.output.length,
       });
     } else if (result.error) {
-      this.emit({
-        type: 'error',
-        source: 'agent-runner',
-        folder: decision.folder,
-        error: result.error,
-      });
+      this.emit({ type: 'error', source: 'agent-runner', folder: decision.folder, error: result.error });
     }
   }
 }
