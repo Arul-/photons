@@ -27,8 +27,6 @@ export default class Claw extends Photon {
   private handlers: Map<string, (msg: any) => void> = new Map(); // jid → handler
   // Message log per folder for context building
   private messageLog: Record<string, MessageEntry[]> = {};
-  private readonly MAX_LOG = 200;
-
   constructor(
     private whatsapp: any,
     private runner: any,
@@ -41,6 +39,8 @@ export default class Claw extends Photon {
     heartbeatIntervalMs: 30000,
     /** Auto-resume pipeline after daemon restart */
     autoResume: true,
+    /** Max messages kept per group for agent context */
+    maxMessageLog: 200,
   };
 
   async onInitialize(ctx?: { reason?: string; oldInstance?: any }): Promise<void> {
@@ -98,8 +98,11 @@ export default class Claw extends Photon {
   /**
    * Start the pipeline: verify WhatsApp connection, subscribe to registered groups.
    * WhatsApp must be connected first via `photon whatsapp connect`.
+   *
+   * @title Start Pipeline
+   * @openWorld
    */
-  async start(): Promise<{ status: string; phone?: string; groups?: number }> {
+  async start(): Promise<{ status: string; phone?: string; groups?: number; message?: string }> {
     if (this.running) return { status: 'already running' };
 
     // Wait for WhatsApp to connect
@@ -112,7 +115,7 @@ export default class Claw extends Photon {
             return {
               status: 'qr_pending',
               message: 'WhatsApp needs QR authentication. Run `photon whatsapp connect` to scan the QR code, then run `claw start` again.',
-            } as any;
+            };
           }
         } catch {
           // connect() may fail transiently — fall through to polling
@@ -133,7 +136,7 @@ export default class Claw extends Photon {
         return {
           status: 'timeout',
           message: `WhatsApp did not connect within 60s (status: ${waStatus.status}). Run \`photon whatsapp connect\` manually, then \`claw start\`.`,
-        } as any;
+        };
       }
     }
 
@@ -155,6 +158,9 @@ export default class Claw extends Photon {
 
   /**
    * Stop the pipeline.
+   *
+   * @title Stop Pipeline
+   * @destructive
    */
   async stop(): Promise<{ status: string }> {
     if (this.autoResumeTimer) { clearTimeout(this.autoResumeTimer); this.autoResumeTimer = null; }
@@ -177,6 +183,9 @@ export default class Claw extends Photon {
   /**
    * Register a WhatsApp group for agent routing.
    * Fuzzy-matches the group name from your WhatsApp groups.
+   *
+   * @title Register Group
+   * @openWorld
    * @param group WhatsApp group name or partial match {@example "Learn CS"}
    * @param folder Group folder name for agent context {@example "learn-cs"}
    * @param trigger Trigger pattern {@example "@bot"}
@@ -222,9 +231,12 @@ export default class Claw extends Photon {
 
   /**
    * Remove a group from routing.
+   *
+   * @title Unregister Group
+   * @destructive
    * @param group WhatsApp group name or JID to unregister {@example "Learn CS"}
    */
-  async unregister(params: { group: string }): Promise<{ removed: boolean }> {
+  async unregister(params: { group: string }): Promise<void> {
     const query = params.group.toLowerCase();
     const jid = Object.values(this.registry).find(
       g => g.name.toLowerCase().includes(query) || g.jid === params.group
@@ -242,12 +254,14 @@ export default class Claw extends Photon {
     delete this.registry[jid];
     await this.memory.set('registry', this.registry);
     this.emit({ type: 'unregistered', jid });
-    return { removed: true };
   }
 
   /**
    * List available WhatsApp groups for registration.
+   *
+   * @title List Groups
    * @readOnly
+   * @openWorld
    * @format table
    */
   async groups(): Promise<Array<{ jid: string; name: string; registered: boolean }>> {
@@ -263,8 +277,11 @@ export default class Claw extends Photon {
 
   /**
    * Show latest health check result.
+   *
+   * @title Health
    * @readOnly
-   * @format kv
+   * @openWorld
+   * @format card
    */
   async health(): Promise<{
     ok: boolean;
@@ -288,8 +305,11 @@ export default class Claw extends Photon {
 
   /**
    * Show pipeline status.
+   *
+   * @title Status
    * @readOnly
-   * @format kv
+   * @openWorld
+   * @format card
    */
   async status(): Promise<{
     running: boolean;
@@ -344,7 +364,7 @@ export default class Claw extends Photon {
   }
 
   private _unsubscribeAll(): void {
-    for (const [jid, handler] of this.handlers) {
+    for (const handler of this.handlers.values()) {
       this.whatsapp.off('message', handler);
     }
     this.handlers.clear();
@@ -406,7 +426,7 @@ export default class Claw extends Photon {
     if (!this.messageLog[group.folder]) this.messageLog[group.folder] = [];
     const log = this.messageLog[group.folder];
     log.push(entry);
-    if (log.length > this.MAX_LOG) log.splice(0, log.length - this.MAX_LOG);
+    if (log.length > this.settings.maxMessageLog) log.splice(0, log.length - this.settings.maxMessageLog);
 
     // Build context from recent messages (include media metadata)
     const context = this._formatContext(log.slice(-20), msg);
