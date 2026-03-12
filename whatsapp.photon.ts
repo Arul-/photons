@@ -243,7 +243,8 @@ export default class WhatsApp extends Photon {
    * @param text Message text to send
    */
   async send(params: { jid: string; text: string }): Promise<{ queued: boolean }> {
-    const { jid, text } = params;
+    const { jid } = params;
+    const text = markdownToWa(params.text);
 
     if (!this.connected || !this.sock) {
       this.outgoingQueue.push({ jid, text, queuedAt: Date.now() });
@@ -272,7 +273,8 @@ export default class WhatsApp extends Photon {
       throw new Error('Not connected. Call connect() first.');
     }
 
-    const { jid, text, quotedId } = params;
+    const { jid, quotedId } = params;
+    const text = markdownToWa(params.text);
     try {
       await this.sock.sendMessage(jid, { text }, {
         quoted: {
@@ -846,6 +848,11 @@ export default class WhatsApp extends Photon {
       result.content = '';
     }
 
+    // Convert WhatsApp formatting → Markdown for all text content
+    if (result.content) {
+      result.content = waToMarkdown(result.content);
+    }
+
     return result;
   }
 
@@ -930,4 +937,88 @@ interface InboundMessage {
   location?: { lat: number; lng: number; name?: string };
   quotedMessage?: { id: string; content: string; sender: string };
   filePath?: string;
+}
+
+// ─── WhatsApp ↔ Markdown Formatting ────────────────────────────────
+
+/**
+ * Convert WhatsApp formatting to standard Markdown.
+ * WhatsApp: *bold*  _italic_  ~strikethrough~  ```code```  `mono`
+ * Markdown: **bold** _italic_ ~~strikethrough~~ ```code```  `mono`
+ */
+function waToMarkdown(text: string): string {
+  // Preserve code blocks (``` ... ```) — same in both formats
+  const codeBlocks: string[] = [];
+  let result = text.replace(/```[\s\S]*?```/g, (m) => {
+    codeBlocks.push(m);
+    return `\x00CB${codeBlocks.length - 1}\x00`;
+  });
+
+  // Preserve inline code (` ... `) — same in both formats
+  const inlineCode: string[] = [];
+  result = result.replace(/`[^`]+`/g, (m) => {
+    inlineCode.push(m);
+    return `\x00IC${inlineCode.length - 1}\x00`;
+  });
+
+  // ~strike~ → ~~strike~~
+  result = result.replace(/(?<!\~)\~(?!\~)([^\~]+?)(?<!\~)\~(?!\~)/g, '~~$1~~');
+
+  // *bold* → **bold** (but not ** which is already markdown)
+  result = result.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '**$1**');
+
+  // _italic_ stays the same (valid in both)
+
+  // Restore inline code and code blocks
+  result = result.replace(/\x00IC(\d+)\x00/g, (_, i) => inlineCode[Number(i)]);
+  result = result.replace(/\x00CB(\d+)\x00/g, (_, i) => codeBlocks[Number(i)]);
+
+  return result;
+}
+
+/**
+ * Convert standard Markdown to WhatsApp formatting.
+ * Markdown: **bold** __bold__ *italic* _italic_ ~~strike~~ [text](url) # headers
+ * WhatsApp: *bold*  *bold*   _italic_ _italic_ ~strike~   text (url)  *header*
+ */
+function markdownToWa(text: string): string {
+  // Preserve code blocks
+  const codeBlocks: string[] = [];
+  let result = text.replace(/```[\s\S]*?```/g, (m) => {
+    codeBlocks.push(m);
+    return `\x00CB${codeBlocks.length - 1}\x00`;
+  });
+
+  // Preserve inline code
+  const inlineCode: string[] = [];
+  result = result.replace(/`[^`]+`/g, (m) => {
+    inlineCode.push(m);
+    return `\x00IC${inlineCode.length - 1}\x00`;
+  });
+
+  // Headers: ## Header → *Header*
+  result = result.replace(/^#{1,6}\s+(.+)$/gm, '*$1*');
+
+  // Links: [text](url) → text (url)
+  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)');
+
+  // **bold** or __bold__ → *bold* (do this before italic)
+  result = result.replace(/\*\*(.+?)\*\*/g, '*$1*');
+  result = result.replace(/__(.+?)__/g, '*$1*');
+
+  // ~~strike~~ → ~strike~
+  result = result.replace(/~~(.+?)~~/g, '~$1~');
+
+  // Unordered lists: - item or * item → • item
+  result = result.replace(/^[\-\*]\s+/gm, '• ');
+
+  // Horizontal rules
+  result = result.replace(/^-{3,}$/gm, '───');
+  result = result.replace(/^\*{3,}$/gm, '───');
+
+  // Restore inline code and code blocks
+  result = result.replace(/\x00IC(\d+)\x00/g, (_, i) => inlineCode[Number(i)]);
+  result = result.replace(/\x00CB(\d+)\x00/g, (_, i) => codeBlocks[Number(i)]);
+
+  return result;
 }

@@ -396,13 +396,10 @@ export default class Claw extends Photon {
     // Skip own messages when no trigger required (prevents loops)
     if (!group.requiresTrigger && msg.fromMe) return;
 
-    // Convert WhatsApp formatting → Markdown before passing to agent
-    const mdContent = waToMarkdown(msg.content);
-
-    // Log the message for context
+    // Log the message for context (content is already Markdown — WhatsApp photon converts it)
     const entry: MessageEntry = {
       sender: msg.senderName,
-      content: mdContent,
+      content: msg.content,
       timestamp: msg.timestamp,
       fromMe: msg.fromMe,
     };
@@ -499,9 +496,9 @@ export default class Claw extends Photon {
       }
     }
 
-    // Convert Markdown → WhatsApp formatting and send text portion
+    // Send text portion (WhatsApp photon auto-converts Markdown → WhatsApp formatting)
     if (textOutput.trim()) {
-      await this.whatsapp.send({ jid, text: markdownToWa(textOutput.trim()) });
+      await this.whatsapp.send({ jid, text: textOutput.trim() });
     }
 
     // Send each media file
@@ -563,91 +560,6 @@ export default class Claw extends Photon {
   private _esc(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
-}
-
-// ─── WhatsApp ↔ Markdown Formatting ────────────────────────────────
-
-/**
- * Convert WhatsApp formatting to standard Markdown.
- * WhatsApp: *bold*  _italic_  ~strikethrough~  ```code```  `mono`
- * Markdown: **bold** _italic_ ~~strikethrough~~ ```code```  `mono`
- */
-function waToMarkdown(text: string): string {
-  // Preserve code blocks (``` ... ```) — they're the same in both formats
-  const codeBlocks: string[] = [];
-  let result = text.replace(/```[\s\S]*?```/g, (m) => {
-    codeBlocks.push(m);
-    return `\x00CB${codeBlocks.length - 1}\x00`;
-  });
-
-  // Preserve inline code (` ... `) — same in both formats
-  const inlineCode: string[] = [];
-  result = result.replace(/`[^`]+`/g, (m) => {
-    inlineCode.push(m);
-    return `\x00IC${inlineCode.length - 1}\x00`;
-  });
-
-  // ~strike~ → ~~strike~~
-  result = result.replace(/(?<!\~)\~(?!\~)([^\~]+?)(?<!\~)\~(?!\~)/g, '~~$1~~');
-
-  // *bold* → **bold** (but not inside words, and not _italic_)
-  // Match *text* at word boundaries, avoiding ** which is already markdown
-  result = result.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '**$1**');
-
-  // _italic_ stays the same (valid in both)
-
-  // Restore inline code and code blocks
-  result = result.replace(/\x00IC(\d+)\x00/g, (_, i) => inlineCode[Number(i)]);
-  result = result.replace(/\x00CB(\d+)\x00/g, (_, i) => codeBlocks[Number(i)]);
-
-  return result;
-}
-
-/**
- * Convert standard Markdown to WhatsApp formatting.
- * Markdown: **bold** __bold__ *italic* _italic_ ~~strike~~ [text](url) # headers
- * WhatsApp: *bold*  *bold*   _italic_ _italic_ ~strike~   text (url)  *header*
- */
-function markdownToWa(text: string): string {
-  // Preserve code blocks
-  const codeBlocks: string[] = [];
-  let result = text.replace(/```[\s\S]*?```/g, (m) => {
-    codeBlocks.push(m);
-    return `\x00CB${codeBlocks.length - 1}\x00`;
-  });
-
-  // Preserve inline code
-  const inlineCode: string[] = [];
-  result = result.replace(/`[^`]+`/g, (m) => {
-    inlineCode.push(m);
-    return `\x00IC${inlineCode.length - 1}\x00`;
-  });
-
-  // Headers: ## Header → *Header*
-  result = result.replace(/^#{1,6}\s+(.+)$/gm, '*$1*');
-
-  // Links: [text](url) → text (url)
-  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)');
-
-  // **bold** or __bold__ → *bold* (do this before italic)
-  result = result.replace(/\*\*(.+?)\*\*/g, '*$1*');
-  result = result.replace(/__(.+?)__/g, '*$1*');
-
-  // ~~strike~~ → ~strike~
-  result = result.replace(/~~(.+?)~~/g, '~$1~');
-
-  // Unordered lists: - item or * item → • item
-  result = result.replace(/^[\-\*]\s+/gm, '• ');
-
-  // Horizontal rules
-  result = result.replace(/^-{3,}$/gm, '───');
-  result = result.replace(/^\*{3,}$/gm, '───');
-
-  // Restore inline code and code blocks
-  result = result.replace(/\x00IC(\d+)\x00/g, (_, i) => inlineCode[Number(i)]);
-  result = result.replace(/\x00CB(\d+)\x00/g, (_, i) => codeBlocks[Number(i)]);
-
-  return result;
 }
 
 // ─── Types ─────────────────────────────────────────────────────────
