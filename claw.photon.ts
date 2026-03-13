@@ -204,15 +204,17 @@ export default class Claw extends Photon {
    * @title Register Group
    * @openWorld
    * @param group WhatsApp group name or partial match {@example "Learn CS"}
-   * @param trigger Trigger word to activate the agent {@example "@"}
+   * @param trigger Trigger word to activate the agent (empty = participant mode) {@example "@"}
    * @param folders Folder names the agent can access — first is the primary context folder {@example ["lura", "photon"]}
-   * @param requiresTrigger Only route messages containing the trigger (default: true)
+   * @param requiresTrigger Only route messages containing the trigger (default: true when trigger is non-empty)
+   * @param systemPrompt System prompt prepended to every agent run for this group {@example "You are Lura, a concise personal assistant."}
    */
   async register(params: {
     group: string;
     trigger: string;
     folders: string[];
     requiresTrigger?: boolean;
+    systemPrompt?: string;
   }): Promise<{ name: string } & GroupConfig> {
     const waGroups = await this.whatsapp.groups();
     const query = params.group.toLowerCase();
@@ -227,10 +229,11 @@ export default class Claw extends Photon {
 
     const config: GroupConfig = {
       trigger: params.trigger,
-      requiresTrigger: params.requiresTrigger ?? true,
+      requiresTrigger: params.requiresTrigger ?? (params.trigger.length > 0),
       folders: params.folders,
       addedAt: new Date().toISOString(),
       allowedSenders: [],
+      systemPrompt: params.systemPrompt ?? '',
     };
 
     this.registry[match.name] = config;
@@ -267,6 +270,49 @@ export default class Claw extends Photon {
     delete this.registry[name];
     await this.memory.set('registry', this.registry);
     this.emit({ type: 'unregistered', name });
+  }
+
+  /**
+   * Update configuration for a registered group.
+   * Only provided fields are changed; omitted fields stay as-is.
+   *
+   * @title Configure Group
+   * @param group Group name (partial match) {@example "Arul and Lura"}
+   * @param trigger New trigger word (empty string = participant mode) {@example "@"}
+   * @param folders New folder list {@example ["lura", "photon"]}
+   * @param requiresTrigger Override trigger requirement
+   * @param systemPrompt System prompt for this group's agent {@example "You are Lura, a concise personal assistant."}
+   */
+  async configure(params: {
+    group: string;
+    trigger?: string;
+    folders?: string[];
+    requiresTrigger?: boolean;
+    systemPrompt?: string;
+  }): Promise<{ name: string } & GroupConfig> {
+    const query = params.group.toLowerCase();
+    const name = Object.keys(this.registry).find(k => k.toLowerCase().includes(query));
+    if (!name) throw new Error(`No registered group matching "${params.group}"`);
+
+    const config = this.registry[name];
+    if (params.trigger !== undefined) {
+      config.trigger = params.trigger;
+      // Re-derive requiresTrigger from trigger unless explicitly overridden
+      if (params.requiresTrigger === undefined) {
+        config.requiresTrigger = params.trigger.length > 0;
+      }
+    }
+    if (params.requiresTrigger !== undefined) config.requiresTrigger = params.requiresTrigger;
+    if (params.folders !== undefined) config.folders = params.folders;
+    if (params.systemPrompt !== undefined) config.systemPrompt = params.systemPrompt;
+
+    await this.memory.set('registry', this.registry);
+
+    // Re-subscribe with updated filter if pipeline is running
+    if (this.running) this._subscribeGroup(name, config);
+
+    this.emit({ type: 'configured', name, config });
+    return { name, ...config };
   }
 
   /**
@@ -679,6 +725,7 @@ export default class Claw extends Photon {
         prompt: context,
         chatJid: event.chatJid,
         sessionId: this.sessionMap[primaryFolder],
+        ...(config.systemPrompt ? { systemPrompt: config.systemPrompt } : {}),
         ...(addDirs.length > 0 ? { addDirs } : {}),
       });
     } finally {
@@ -815,6 +862,8 @@ interface GroupConfig {
   addedAt: string;
   /** Allowed sender phone numbers (digits only). Empty = allow all. */
   allowedSenders: string[];
+  /** System prompt prepended to every agent run for this group. */
+  systemPrompt: string;
 }
 
 interface MessageEntry {
