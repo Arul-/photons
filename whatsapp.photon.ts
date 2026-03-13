@@ -24,8 +24,8 @@ const debugLogger = pino({ level: 'debug' });
 /** Max age for queued messages before they're dropped on flush (1 hour) */
 const MESSAGE_TTL_MS = 60 * 60 * 1000;
 
-/** Directory for downloaded media files */
-const MEDIA_DIR = path.join(os.homedir(), '.photon', 'data', 'whatsapp', 'media');
+/** @deprecated Use this.storage('media') instead — kept for backward compat fallback */
+const LEGACY_MEDIA_DIR = path.join(os.homedir(), '.photon', 'data', 'whatsapp', 'media');
 
 /**
  * WhatsApp — live WhatsApp connection via Baileys.
@@ -73,13 +73,22 @@ export default class WhatsApp extends Photon {
     resolvedJid?: string; // cached JID from group name lookup
   }> = [];
 
-  /** Pass a custom auth directory, or leave empty to use ~/.photon/data/whatsapp/auth */
+  /** Pass a custom auth directory, or leave empty to use this.storage('auth') */
   constructor(private _authDir: string = '') {
     super();
   }
 
   private get authDir(): string {
-    return this._authDir || path.join(os.homedir(), '.photon', 'data', 'whatsapp', 'auth');
+    if (this._authDir) return this._authDir;
+    // Use new storage API if available (runtime-injected _photonFilePath)
+    if (this._photonFilePath) return this.storage('auth');
+    // Legacy fallback for older runtimes
+    return path.join(os.homedir(), '.photon', 'data', 'whatsapp', 'auth');
+  }
+
+  private get mediaDir(): string {
+    if (this._photonFilePath) return this.storage('media');
+    return LEGACY_MEDIA_DIR;
   }
 
   private get _logger() {
@@ -87,7 +96,7 @@ export default class WhatsApp extends Photon {
   }
 
   async onInitialize(ctx?: { reason?: string; oldInstance?: any }): Promise<void> {
-    fs.mkdirSync(MEDIA_DIR, { recursive: true });
+    fs.mkdirSync(this.mediaDir, { recursive: true });
     // Hot-reload: take over the socket from the old instance instead of reconnecting.
     // This avoids destroying the WhatsApp session (which could trigger 440 bans).
     if (ctx?.reason === 'hot-reload' && ctx.oldInstance) {
@@ -651,7 +660,7 @@ export default class WhatsApp extends Photon {
   private async _downloadMedia(msg: any, inbound: InboundMessage): Promise<void> {
     const ext = this._mimeToExt(inbound.media?.mimetype || '');
     const filename = `${inbound.messageId}${ext}`;
-    const filePath = path.join(MEDIA_DIR, filename);
+    const filePath = path.join(this.mediaDir, filename);
 
     // Skip if already downloaded (e.g. from a retry)
     if (fs.existsSync(filePath)) {
