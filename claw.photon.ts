@@ -27,8 +27,6 @@ export default class Claw extends Photon {
   private handlers: Map<string, (msg: any) => void> = new Map();
   // Message log per group name for context building
   private messageLog: Record<string, MessageEntry[]> = {};
-  // Sender allowlist — persisted via this.memory; empty = allow all
-  private _allowedSenders: string[] = [];
   constructor(
     private whatsapp: any,
     private runner: any,
@@ -56,7 +54,6 @@ export default class Claw extends Photon {
       this.registry = old.registry || {};
       this.messageLog = old.messageLog || {};
       this.handlers = old.handlers || new Map();
-      this._allowedSenders = old._allowedSenders || [];
 
       if (old.heartbeatTimer) {
         this.heartbeatTimer = old.heartbeatTimer;
@@ -75,8 +72,6 @@ export default class Claw extends Photon {
     const savedSessions = await this.memory.get<Record<string, string>>('sessionMap');
     if (savedSessions) this.sessionMap = savedSessions;
 
-    const savedSenders = await this.memory.get<string[]>('allowedSenders');
-    if (savedSenders) this._allowedSenders = savedSenders;
 
     const wasRunning = await this.memory.get<boolean>('running');
     if (wasRunning && this.settings.autoResume) {
@@ -150,10 +145,17 @@ export default class Claw extends Photon {
 
     yield { emit: 'status', message: `WhatsApp connected (${waStatus.phone}) — subscribing to groups...` };
 
-    // Auto-seed allowlist with own number so fromMe messages are always allowed
-    if (this._allowedSenders.length === 0 && waStatus.phone) {
-      this._allowedSenders = [waStatus.phone];
-      await this.memory.set('allowedSenders', this._allowedSenders);
+    // Auto-seed each group's allowlist with own number if not yet set
+    if (waStatus.phone) {
+      const ownPhone = waStatus.phone.replace(/\D/g, '');
+      let changed = false;
+      for (const config of Object.values(this.registry)) {
+        if (config.allowedSenders.length === 0) {
+          config.allowedSenders = [ownPhone];
+          changed = true;
+        }
+      }
+      if (changed) await this.memory.set('registry', this.registry);
     }
 
     this.running = true;
@@ -228,6 +230,7 @@ export default class Claw extends Photon {
       requiresTrigger: params.requiresTrigger ?? true,
       folders: params.folders,
       addedAt: new Date().toISOString(),
+      allowedSenders: [],
     };
 
     this.registry[match.name] = config;
@@ -267,49 +270,54 @@ export default class Claw extends Photon {
   }
 
   /**
-   * List allowed senders. Empty list means all senders are allowed.
+   * List allowed senders for a group. Empty = all senders allowed.
    * Auto-seeded with your own number when claw starts.
    *
    * @title Senders
    * @readOnly
    * @closedWorld
    * @format table
+   * @param group Group name (partial match) {@example "Arul and Lura"}
    */
-  async senders(): Promise<Array<{ phone: string }>> {
-    return this._allowedSenders.map(phone => ({ phone }));
+  async senders(params: { group: string }): Promise<Array<{ phone: string }>> {
+    const config = this._findConfig(params.group);
+    return config.allowedSenders.map(phone => ({ phone }));
   }
 
   /**
-   * Add a phone number to the allowed senders list.
+   * Add a phone number to a group's allowed senders list.
    *
    * @title Allow Sender
-   * @openWorld
+   * @param group Group name (partial match) {@example "Arul and Lura"}
    * @param phone Phone number to allow {@example "+60123456789"}
    */
-  async allow(params: { phone: string }): Promise<{ allowed: string[] }> {
+  async allow(params: { group: string; phone: string }): Promise<{ allowed: string[] }> {
+    const config = this._findConfig(params.group);
     const normalized = params.phone.replace(/\D/g, '');
-    if (!this._allowedSenders.includes(normalized)) {
-      this._allowedSenders.push(normalized);
-      await this.memory.set('allowedSenders', this._allowedSenders);
+    if (!config.allowedSenders.includes(normalized)) {
+      config.allowedSenders.push(normalized);
+      await this.memory.set('registry', this.registry);
     }
-    return { allowed: this._allowedSenders };
+    return { allowed: config.allowedSenders };
   }
 
   /**
-   * Remove a phone number from the allowed senders list.
+   * Remove a phone number from a group's allowed senders list.
    * At least one sender must remain.
    *
    * @title Deny Sender
    * @destructive
+   * @param group Group name (partial match) {@example "Arul and Lura"}
    * @param phone Phone number to remove {@example "+60123456789"}
    */
-  async deny(params: { phone: string }): Promise<{ allowed: string[] }> {
+  async deny(params: { group: string; phone: string }): Promise<{ allowed: string[] }> {
+    const config = this._findConfig(params.group);
     const normalized = params.phone.replace(/\D/g, '');
-    const updated = this._allowedSenders.filter(s => s !== normalized);
+    const updated = config.allowedSenders.filter(s => s !== normalized);
     if (updated.length === 0) throw new Error('Cannot remove the last allowed sender. Add another first.');
-    this._allowedSenders = updated;
-    await this.memory.set('allowedSenders', this._allowedSenders);
-    return { allowed: this._allowedSenders };
+    config.allowedSenders = updated;
+    await this.memory.set('registry', this.registry);
+    return { allowed: config.allowedSenders };
   }
 
   /**
@@ -507,6 +515,12 @@ export default class Claw extends Photon {
 
   // ─── Internal ──────────────────────────────────────────────────
 
+  private _findConfig(query: string): GroupConfig {
+    const key = Object.keys(this.registry).find(k => k.toLowerCase().includes(query.toLowerCase()));
+    if (!key) throw new Error(`No registered group matching "${query}"`);
+    return this.registry[key];
+  }
+
   /** Called by the scheduler — runs an agent prompt and sends result to the group */
   async _runScheduled(params: { groupName: string; primaryFolder: string; prompt: string }): Promise<void> {
     if (!this.running) return;
@@ -613,9 +627,9 @@ export default class Claw extends Photon {
     if (msg.fromMe && msg.content.startsWith(agentPrefix)) return;
 
     // Sender allowlist: when non-empty, only route messages from allowed senders
-    if (this._allowedSenders.length > 0 && !msg.fromMe) {
+    if (config.allowedSenders.length > 0 && !msg.fromMe) {
       const senderPhone = msg.sender.replace(/[^0-9]/g, '');
-      if (!this._allowedSenders.some(s => senderPhone.endsWith(s) || s.endsWith(senderPhone))) return;
+      if (!config.allowedSenders.some(s => senderPhone.endsWith(s) || s.endsWith(senderPhone))) return;
     }
 
     // Log the message for context, keyed by group name
@@ -799,6 +813,8 @@ interface GroupConfig {
   requiresTrigger: boolean;
   folders: string[];
   addedAt: string;
+  /** Allowed sender phone numbers (digits only). Empty = allow all. */
+  allowedSenders: string[];
 }
 
 interface MessageEntry {
