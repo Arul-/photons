@@ -160,11 +160,7 @@ export default class WhatsApp extends Photon {
     message?: string;
   }> {
     if (this.connected) {
-      return {
-        status: 'already_connected',
-        phone: this.phoneNumber,
-        message: `Already connected as +${this.phoneNumber}`,
-      };
+      throw new Error(`Already connected as +${this.phoneNumber}`);
     }
     // Deduplicate concurrent connect() calls — return same promise
     if (this._connectPromise) {
