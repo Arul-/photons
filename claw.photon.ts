@@ -12,7 +12,7 @@ import { Photon } from '@portel/photon-core';
  * @tags orchestrator, whatsapp, agent, claw
  * @stateful
  * @photon whatsapp ./whatsapp.photon.ts
- * @photon runner ./agent-runner.photon.ts
+ * @photon router ./agent-router.photon.ts
  */
 export default class Claw extends Photon {
   private running = false;
@@ -29,7 +29,7 @@ export default class Claw extends Photon {
   private messageLog: Record<string, MessageEntry[]> = {};
   constructor(
     private whatsapp: any,
-    private runner: any,
+    private router: any,
   ) {
     super();
   }
@@ -208,6 +208,7 @@ export default class Claw extends Photon {
    * @param folders Folder names the agent can access — first is the primary context folder {@example ["lura", "photon"]}
    * @param requiresTrigger Only route messages containing the trigger (default: true when trigger is non-empty)
    * @param systemPrompt System prompt prepended to every agent run for this group {@example "You are Lura, a concise personal assistant."}
+   * @param agent Agent to use for this group ('claude'|'gemini'|'aider'|'opencode'|'auto') {@example "claude"}
    */
   async register(params: {
     group: string;
@@ -215,6 +216,7 @@ export default class Claw extends Photon {
     folders: string[];
     requiresTrigger?: boolean;
     systemPrompt?: string;
+    agent?: string;
   }): Promise<{ name: string } & GroupConfig> {
     const waGroups = await this.whatsapp.groups();
     const query = params.group.toLowerCase();
@@ -234,6 +236,7 @@ export default class Claw extends Photon {
       addedAt: new Date().toISOString(),
       allowedSenders: [],
       systemPrompt: params.systemPrompt ?? '',
+      agent: params.agent ?? 'claude',
     };
 
     this.registry[match.name] = config;
@@ -282,6 +285,7 @@ export default class Claw extends Photon {
    * @param folders New folder list {@example ["lura", "photon"]}
    * @param requiresTrigger Override trigger requirement
    * @param systemPrompt System prompt for this group's agent {@example "You are Lura, a concise personal assistant."}
+   * @param agent Switch to a different agent ('claude'|'gemini'|'aider'|'opencode'|'auto') {@example "gemini"}
    */
   async configure(params: {
     group: string;
@@ -289,6 +293,7 @@ export default class Claw extends Photon {
     folders?: string[];
     requiresTrigger?: boolean;
     systemPrompt?: string;
+    agent?: string;
   }): Promise<{ name: string } & GroupConfig> {
     const query = params.group.toLowerCase();
     const name = Object.keys(this.registry).find(k => k.toLowerCase().includes(query));
@@ -305,6 +310,7 @@ export default class Claw extends Photon {
     if (params.requiresTrigger !== undefined) config.requiresTrigger = params.requiresTrigger;
     if (params.folders !== undefined) config.folders = params.folders;
     if (params.systemPrompt !== undefined) config.systemPrompt = params.systemPrompt;
+    if (params.agent !== undefined) config.agent = params.agent;
 
     await this.memory.set('registry', this.registry);
 
@@ -396,7 +402,8 @@ export default class Claw extends Photon {
     const name = Object.keys(this.registry).find(k => k.toLowerCase().includes(query));
     if (!name) throw new Error(`No registered group matching "${params.group}"`);
     const config = this.registry[name];
-    delete this.sessionMap[config.folders[0]];
+    delete this.sessionMap[config.folders[0]]; // legacy bare key
+    delete this.sessionMap[`${config.agent}:${config.folders[0]}`];
     await this.memory.set('sessionMap', this.sessionMap);
     this.emit({ type: 'session_reset', group: name });
   }
@@ -548,7 +555,7 @@ export default class Claw extends Photon {
 
     const [whatsapp, runnerStatus] = await Promise.all([
       safe(() => this.whatsapp.status(), { status: 'unknown' }),
-      safe(() => this.runner.status(), { active: [], queued: 0 }),
+      safe(() => this.router.status(), { totalActive: 0, totalQueued: 0 }),
     ]);
 
     return {
@@ -576,15 +583,19 @@ export default class Claw extends Photon {
 
     this.emit({ type: 'scheduled_run', group: groupName, folder: primaryFolder });
 
-    const result = await this.runner.run({
+    const sessionKey = `${config.agent}:${primaryFolder}`;
+    const sessionId = this.sessionMap[sessionKey] ?? (config.agent === 'claude' ? this.sessionMap[primaryFolder] : undefined);
+
+    const result = await this.router.run({
       groupFolder: primaryFolder,
       prompt,
-      sessionId: this.sessionMap[primaryFolder],
+      agent: config.agent,
+      sessionId,
       ...(config.folders.slice(1).length > 0 ? { addDirs: config.folders.slice(1) } : {}),
     });
 
     if (result.sessionId) {
-      this.sessionMap[primaryFolder] = result.sessionId;
+      this.sessionMap[`${config.agent}:${primaryFolder}`] = result.sessionId;
       await this.memory.set('sessionMap', this.sessionMap);
     }
 
@@ -647,8 +658,8 @@ export default class Claw extends Photon {
     }
 
     try {
-      const r = await this.runner.status();
-      runnerStatus = `active:${r.active?.length ?? 0},queued:${r.queued ?? 0}`;
+      const r = await this.router.status();
+      runnerStatus = `active:${r.totalActive ?? 0},queued:${r.totalQueued ?? 0}`;
     } catch {
       ok = false;
       runnerStatus = 'unreachable';
@@ -718,13 +729,17 @@ export default class Claw extends Photon {
       if (!addDirs.includes(mediaDir)) addDirs.push(mediaDir);
     }
 
+    const sessionKey = `${config.agent}:${primaryFolder}`;
+    const sessionId = this.sessionMap[sessionKey] ?? (config.agent === 'claude' ? this.sessionMap[primaryFolder] : undefined);
+
     let result: any;
     try {
-      result = await this.runner.run({
+      result = await this.router.run({
         groupFolder: primaryFolder,
         prompt: context,
         chatJid: event.chatJid,
-        sessionId: this.sessionMap[primaryFolder],
+        agent: config.agent,
+        sessionId,
         ...(config.systemPrompt ? { systemPrompt: config.systemPrompt } : {}),
         ...(addDirs.length > 0 ? { addDirs } : {}),
       });
@@ -734,7 +749,7 @@ export default class Claw extends Photon {
     }
 
     if (result.sessionId) {
-      this.sessionMap[primaryFolder] = result.sessionId;
+      this.sessionMap[`${config.agent}:${primaryFolder}`] = result.sessionId;
       await this.memory.set('sessionMap', this.sessionMap);
     }
 
@@ -864,6 +879,8 @@ interface GroupConfig {
   allowedSenders: string[];
   /** System prompt prepended to every agent run for this group. */
   systemPrompt: string;
+  /** Agent to use: 'claude' | 'gemini' | 'aider' | 'opencode' | 'auto' */
+  agent: string;
 }
 
 interface MessageEntry {
