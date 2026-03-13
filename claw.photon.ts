@@ -27,6 +27,8 @@ export default class Claw extends Photon {
   private handlers: Map<string, (msg: any) => void> = new Map();
   // Message log per group name for context building
   private messageLog: Record<string, MessageEntry[]> = {};
+  // Sender allowlist — persisted via this.memory; empty = allow all
+  private _allowedSenders: string[] = [];
   constructor(
     private whatsapp: any,
     private runner: any,
@@ -41,6 +43,8 @@ export default class Claw extends Photon {
     autoResume: true,
     /** Max messages kept per group for agent context */
     maxMessageLog: 200,
+    /** Name prefix the agent uses when sending messages (e.g. "Lura: ..."). Also acts as loop-prevention sentinel. */
+    agentName: 'Lura',
   };
 
   async onInitialize(ctx?: { reason?: string; oldInstance?: any }): Promise<void> {
@@ -52,6 +56,7 @@ export default class Claw extends Photon {
       this.registry = old.registry || {};
       this.messageLog = old.messageLog || {};
       this.handlers = old.handlers || new Map();
+      this._allowedSenders = old._allowedSenders || [];
 
       if (old.heartbeatTimer) {
         this.heartbeatTimer = old.heartbeatTimer;
@@ -70,11 +75,13 @@ export default class Claw extends Photon {
     const savedSessions = await this.memory.get<Record<string, string>>('sessionMap');
     if (savedSessions) this.sessionMap = savedSessions;
 
+    const savedSenders = await this.memory.get<string[]>('allowedSenders');
+    if (savedSenders) this._allowedSenders = savedSenders;
+
     const wasRunning = await this.memory.get<boolean>('running');
     if (wasRunning && this.settings.autoResume) {
       const tryResume = async (attempts = 0): Promise<void> => {
         try {
-          // Consume the generator — progress emits fire internally
           for await (const _ of this.start()) { /* yield values are UI-only */ }
           this.emit({ type: 'auto_resumed' });
         } catch {
@@ -142,6 +149,12 @@ export default class Claw extends Photon {
     }
 
     yield { emit: 'status', message: `WhatsApp connected (${waStatus.phone}) — subscribing to groups...` };
+
+    // Auto-seed allowlist with own number so fromMe messages are always allowed
+    if (this._allowedSenders.length === 0 && waStatus.phone) {
+      this._allowedSenders = [waStatus.phone];
+      await this.memory.set('allowedSenders', this._allowedSenders);
+    }
 
     this.running = true;
     await this.memory.set('running', true);
@@ -254,6 +267,166 @@ export default class Claw extends Photon {
   }
 
   /**
+   * List allowed senders. Empty list means all senders are allowed.
+   * Auto-seeded with your own number when claw starts.
+   *
+   * @title Senders
+   * @readOnly
+   * @closedWorld
+   * @format table
+   */
+  async senders(): Promise<Array<{ phone: string }>> {
+    return this._allowedSenders.map(phone => ({ phone }));
+  }
+
+  /**
+   * Add a phone number to the allowed senders list.
+   *
+   * @title Allow Sender
+   * @openWorld
+   * @param phone Phone number to allow {@example "+60123456789"}
+   */
+  async allow(params: { phone: string }): Promise<{ allowed: string[] }> {
+    const normalized = params.phone.replace(/\D/g, '');
+    if (!this._allowedSenders.includes(normalized)) {
+      this._allowedSenders.push(normalized);
+      await this.memory.set('allowedSenders', this._allowedSenders);
+    }
+    return { allowed: this._allowedSenders };
+  }
+
+  /**
+   * Remove a phone number from the allowed senders list.
+   * At least one sender must remain.
+   *
+   * @title Deny Sender
+   * @destructive
+   * @param phone Phone number to remove {@example "+60123456789"}
+   */
+  async deny(params: { phone: string }): Promise<{ allowed: string[] }> {
+    const normalized = params.phone.replace(/\D/g, '');
+    const updated = this._allowedSenders.filter(s => s !== normalized);
+    if (updated.length === 0) throw new Error('Cannot remove the last allowed sender. Add another first.');
+    this._allowedSenders = updated;
+    await this.memory.set('allowedSenders', this._allowedSenders);
+    return { allowed: this._allowedSenders };
+  }
+
+  /**
+   * View recent message history for a group.
+   *
+   * @title History
+   * @readOnly
+   * @closedWorld
+   * @format table
+   * @param group Group name (partial match) {@example "Arul and Lura"}
+   * @param limit Number of recent messages to show (default: 20)
+   */
+  async history(params: { group: string; limit?: number }): Promise<MessageEntry[]> {
+    const query = params.group.toLowerCase();
+    const name = Object.keys(this.messageLog).find(k => k.toLowerCase().includes(query));
+    if (!name) throw new Error(`No message history for group matching "${params.group}"`);
+    const log = this.messageLog[name];
+    return log.slice(-(params.limit ?? 20));
+  }
+
+  /**
+   * Clear the agent session for a group, forcing fresh context on next message.
+   *
+   * @title Reset Session
+   * @destructive
+   * @param group Group name (partial match) {@example "Arul and Lura"}
+   */
+  async reset(params: { group: string }): Promise<void> {
+    const query = params.group.toLowerCase();
+    const name = Object.keys(this.registry).find(k => k.toLowerCase().includes(query));
+    if (!name) throw new Error(`No registered group matching "${params.group}"`);
+    const config = this.registry[name];
+    delete this.sessionMap[config.folders[0]];
+    await this.memory.set('sessionMap', this.sessionMap);
+    this.emit({ type: 'session_reset', group: name });
+  }
+
+  /**
+   * Clear the in-memory message log for a group.
+   *
+   * @title Clear Log
+   * @destructive
+   * @param group Group name (partial match) {@example "Arul and Lura"}
+   */
+  async clear(params: { group: string }): Promise<void> {
+    const query = params.group.toLowerCase();
+    const name = Object.keys(this.messageLog).find(k => k.toLowerCase().includes(query));
+    if (!name) throw new Error(`No message log for group matching "${params.group}"`);
+    this.messageLog[name] = [];
+    this.emit({ type: 'log_cleared', group: name });
+  }
+
+  /**
+   * Schedule a recurring or one-time agent run for a group.
+   * Uses cron syntax or @daily / @hourly / @weekly / @monthly shorthands.
+   *
+   * @title Schedule Task
+   * @openWorld
+   * @param group Group name (partial match) {@example "Arul and Lura"}
+   * @param prompt Prompt to send to the agent {@example "Summarise today's messages"}
+   * @param cron Cron expression or shorthand {@example "0 9 * * *"}
+   * @param name Optional task name for later reference {@example "morning-summary"}
+   */
+  async task(params: { group: string; prompt: string; cron: string; name?: string }): Promise<{ id: string; name: string; cron: string }> {
+    const query = params.group.toLowerCase();
+    const groupName = Object.keys(this.registry).find(k => k.toLowerCase().includes(query));
+    if (!groupName) throw new Error(`No registered group matching "${params.group}"`);
+    const config = this.registry[groupName];
+
+    const taskName = params.name ?? `${groupName}-task`;
+    const existing = await this.schedule.getByName(taskName).catch(() => null);
+    if (existing) await this.schedule.cancel(existing.id);
+
+    const scheduled = await this.schedule.create({
+      name: taskName,
+      schedule: params.cron,
+      method: '_runScheduled',
+      params: { groupName, primaryFolder: config.folders[0], prompt: params.prompt },
+    });
+
+    return { id: scheduled.id, name: taskName, cron: params.cron };
+  }
+
+  /**
+   * Cancel a scheduled task by name.
+   *
+   * @title Cancel Task
+   * @destructive
+   * @param name Task name {@example "morning-summary"}
+   */
+  async cancel(params: { name: string }): Promise<void> {
+    const task = await this.schedule.getByName(params.name);
+    if (!task) throw new Error(`No scheduled task named "${params.name}"`);
+    await this.schedule.cancel(task.id);
+  }
+
+  /**
+   * List all scheduled tasks.
+   *
+   * @title Scheduled Tasks
+   * @readOnly
+   * @closedWorld
+   * @format table
+   */
+  async tasks(): Promise<Array<{ id: string; name: string; schedule: string; group: string; nextRun: string | null; status: string }>> {
+    const all = await this.schedule.list('active');
+    return all.map((t: any) => ({
+      id: t.id,
+      name: t.name,
+      schedule: t.schedule,
+      group: t.params?.groupName ?? '',
+      nextRun: t.nextRun ?? null,
+      status: t.status,
+    }));
+  }
+
+  /**
    * List available WhatsApp groups for registration.
    *
    * @title List Groups
@@ -334,6 +507,32 @@ export default class Claw extends Photon {
 
   // ─── Internal ──────────────────────────────────────────────────
 
+  /** Called by the scheduler — runs an agent prompt and sends result to the group */
+  async _runScheduled(params: { groupName: string; primaryFolder: string; prompt: string }): Promise<void> {
+    if (!this.running) return;
+    const { groupName, primaryFolder, prompt } = params;
+    const config = this.registry[groupName];
+    if (!config) return;
+
+    this.emit({ type: 'scheduled_run', group: groupName, folder: primaryFolder });
+
+    const result = await this.runner.run({
+      groupFolder: primaryFolder,
+      prompt,
+      sessionId: this.sessionMap[primaryFolder],
+      ...(config.folders.slice(1).length > 0 ? { addDirs: config.folders.slice(1) } : {}),
+    });
+
+    if (result.sessionId) {
+      this.sessionMap[primaryFolder] = result.sessionId;
+      await this.memory.set('sessionMap', this.sessionMap);
+    }
+
+    if (result.status === 'success' && result.output) {
+      await this._sendAgentResponse(groupName, result.output, primaryFolder, result.duration);
+    }
+  }
+
   private _subscribeAll(): void {
     for (const [name, config] of Object.entries(this.registry)) {
       this._subscribeGroup(name, config);
@@ -408,9 +607,16 @@ export default class Claw extends Photon {
   }): Promise<void> {
     const msg = event.message;
     const primaryFolder = config.folders[0];
+    const agentPrefix = `${this.settings.agentName}: `;
 
-    // Skip own messages when no trigger required (prevents loops)
-    if (!config.requiresTrigger && msg.fromMe) return;
+    // Always skip agent's own responses to prevent loops
+    if (msg.fromMe && msg.content.startsWith(agentPrefix)) return;
+
+    // Sender allowlist: when non-empty, only route messages from allowed senders
+    if (this._allowedSenders.length > 0 && !msg.fromMe) {
+      const senderPhone = msg.sender.replace(/[^0-9]/g, '');
+      if (!this._allowedSenders.some(s => senderPhone.endsWith(s) || s.endsWith(senderPhone))) return;
+    }
 
     // Log the message for context, keyed by group name
     const entry: MessageEntry = {
@@ -513,14 +719,15 @@ export default class Claw extends Photon {
 
     // Send text portion — edit the ACK in-place if we have its key, else send fresh
     if (textOutput.trim()) {
+      const prefixed = `${this.settings.agentName}: ${textOutput.trim()}`;
       if (ackKey) {
-        await this.whatsapp.edit({ key: ackKey, text: textOutput.trim() }).catch(async () => {
+        await this.whatsapp.edit({ key: ackKey, text: prefixed }).catch(async () => {
           // Fall back to a new message if edit fails (e.g. too old, unsupported client)
-          await this.whatsapp.send({ chat, text: textOutput.trim() });
+          await this.whatsapp.send({ chat, text: prefixed });
         });
         ackKey = null; // consumed — media attachments below go as separate messages
       } else {
-        await this.whatsapp.send({ chat, text: textOutput.trim() });
+        await this.whatsapp.send({ chat, text: prefixed });
       }
     }
 
