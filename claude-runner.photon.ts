@@ -217,9 +217,9 @@ export default class ClaudeRunner extends Photon {
         result = await this._spawnClaude(groupDir, groupFolder, retryPrompt, undefined, systemPrompt, runState, addDirs);
       }
 
-      // Store conversation for future memory injection
+      // Store conversation for future memory injection (awaited so next call sees it)
       if (result.status === 'success' && result.output) {
-        this._storeConversation(groupFolder, prompt, result.output).catch(() => { /* non-fatal */ });
+        await this._storeConversation(groupFolder, prompt, result.output).catch(() => { /* non-fatal */ });
       }
 
       const logFile = path.join(groupDir, 'logs', `${new Date().toISOString().replace(/[:.]/g, '-')}.json`);

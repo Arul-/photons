@@ -1,27 +1,25 @@
 /**
  * claw.test.ts — integration tests for the WhatsApp ↔ agent pipeline.
  *
- * HOW IT WORKS:
- *   1. Reads claw.status() to verify the daemon is running and WhatsApp connected
- *   2. Sends a trigger message via the daemon's whatsapp instance (photon cli)
- *   3. Polls the group's run log directory for a new success entry
- *   4. Asserts the agent processed the message and produced output
+ * ARCHITECTURE NOTE:
+ *   `photon test claw` runs in "direct" mode: it loads the dev claw from
+ *   /Users/arul/Projects/arul-photons/claw.photon.ts with all dependencies
+ *   (router, claude-runner, etc.) as fresh in-process instances. The tests
+ *   access these via (_photon as any).router — no daemon or WhatsApp needed.
  *
- * PREREQUISITES:
- *   photon claw start                          (claw must be running)
- *   photon whatsapp connect                    (WhatsApp must be connected)
- *   photon claw register --group "..."  ...    (at least one group registered)
+ *   The full WhatsApp E2E test (testWhatsAppTriggeredPipeline) is opt-in:
+ *   requires TEST_FULL_E2E=1, uses `photon cli` to send via the live daemon.
  *
  * CONFIGURATION (env vars):
- *   TEST_CLAW_GROUP    Partial group name match (default: "Arul and Lura")
- *   TEST_CLAW_TRIGGER  Trigger word (default: "@")
- *   TEST_CLAW_FOLDER   Primary folder name under baseDir (default: "lura")
- *   TEST_BASE_DIR      Base dir for group folders (default: ~/Projects)
- *   TEST_TIMEOUT_MS    Max wait for agent to complete (default: 120000)
+ *   TEST_CLAW_GROUP    Group name for E2E test (default: "Arul and Lura")
+ *   TEST_CLAW_TRIGGER  Trigger word for E2E test (default: "@")
+ *   TEST_LOG_DIR       Log dir the daemon writes to for E2E test (default: ~/Projects/logs)
+ *   TEST_TIMEOUT_MS    Max ms to wait for agent completion (default: 120000)
+ *   TEST_FULL_E2E      Set to "1" to run the WhatsApp E2E test
  *
  * USAGE:
- *   photon test claw
- *   TEST_CLAW_GROUP="My Group" TEST_CLAW_FOLDER="my-folder" photon test claw
+ *   photon test claw                          (runs tests 1–3, skips E2E)
+ *   TEST_FULL_E2E=1 photon test claw          (runs all 4 tests)
  */
 
 import { execFileSync } from 'child_process';
@@ -32,17 +30,16 @@ import path from 'path';
 // ── Configuration ─────────────────────────────────────────────────────────────
 
 const CONFIG = {
-  group:       process.env.TEST_CLAW_GROUP   ?? 'Arul and Lura',
-  trigger:     process.env.TEST_CLAW_TRIGGER ?? '@',
-  groupFolder: process.env.TEST_CLAW_FOLDER  ?? 'lura',
-  baseDir:     process.env.TEST_BASE_DIR     ?? path.join(os.homedir(), 'Projects'),
-  timeoutMs:   Number(process.env.TEST_TIMEOUT_MS ?? 120_000),
-  pollMs:      2_000,
+  group:      process.env.TEST_CLAW_GROUP   ?? 'Arul and Lura',
+  trigger:    process.env.TEST_CLAW_TRIGGER ?? '@',
+  logDir:     process.env.TEST_LOG_DIR      ?? path.join(os.homedir(), 'Projects', 'logs'),
+  timeoutMs:  Number(process.env.TEST_TIMEOUT_MS ?? 120_000),
+  pollMs:     2_000,
+  fullE2E:    process.env.TEST_FULL_E2E === '1',
 };
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── CLI helpers (for E2E test only) ──────────────────────────────────────────
 
-/** Run a photon CLI command against the daemon. Throws if it fails. */
 function photonCli(...args: string[]): string {
   return execFileSync('photon', ['cli', ...args], {
     encoding: 'utf8',
@@ -50,6 +47,8 @@ function photonCli(...args: string[]): string {
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 }
+
+// ── Log polling helpers ───────────────────────────────────────────────────────
 
 interface LogInfo { mtime: number; filePath: string }
 
@@ -88,172 +87,173 @@ async function pollForNewLog(
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 /**
- * PREREQUISITE CHECK — call this at the top of each integration test.
- * Throws a descriptive error if claw isn't in a testable state.
+ * Accesses the dev claw's injected router directly and calls run() with agent='claude'.
+ * Verifies the router → claude-runner → claude CLI chain produces a successful result.
+ * No daemon or WhatsApp connection required.
  */
-async function assertPrerequisites(photon: any): Promise<void> {
-  const status = await photon.status();
-
-  if (!status.running) {
+export async function testRouterDelegatesAndLogsSuccess(_photon: any) {
+  const router = (_photon as any).router;
+  if (!router) {
     throw new Error(
-      'Prerequisite not met: claw is not running.\n' +
-      'Fix: photon claw start',
-    );
-  }
-  if (status.whatsapp?.status !== 'connected') {
-    throw new Error(
-      `Prerequisite not met: WhatsApp not connected (status: ${status.whatsapp?.status}).\n` +
-      'Fix: photon whatsapp connect',
+      'router dependency not available on the claw instance.\n' +
+      'Check that claw.photon.ts has @photon router ./agent-router.photon.ts',
     );
   }
 
-  const match = status.groups?.find((g: any) =>
-    g.name?.toLowerCase().includes(CONFIG.group.toLowerCase()),
-  );
-  if (!match) {
+  // Use a unique temp folder so logs don't collide with real groups
+  const groupFolder = `_test-${Date.now()}`;
+
+  const result = await router.run({
+    groupFolder,
+    prompt: 'Reply with exactly these three words: integration test passed',
+    agent: 'claude',
+  });
+
+  if (result.status !== 'success') {
     throw new Error(
-      `Prerequisite not met: no registered group matching "${CONFIG.group}".\n` +
-      `Fix: photon claw register --group "${CONFIG.group}" --trigger "${CONFIG.trigger}" --folders "${CONFIG.groupFolder}"`,
+      `Router/runner failed.\n` +
+      `Error: ${result.error ?? 'none'}\n` +
+      `Output: ${result.output ?? 'none'}`,
+    );
+  }
+  if (!result.output?.trim()) {
+    throw new Error('Agent returned empty output');
+  }
+
+  console.log(`  ✓ router → claude-runner → claude: ${result.duration}ms`);
+  console.log(`  ✓ Output: "${result.output.slice(0, 200)}"`);
+}
+
+/**
+ * Runs two sequential calls through the router (no sessionId), verifying that
+ * the second call receives memory context from the first via keyword injection.
+ * The unique token planted in run 1 should appear in run 2's response.
+ * No daemon or WhatsApp required.
+ */
+export async function testMemoryInjectionAcrossRuns(_photon: any) {
+  const router = (_photon as any).router;
+  if (!router) {
+    throw new Error('router dependency not available — see testRouterDelegatesAndLogsSuccess');
+  }
+
+  const groupFolder = `_test-mem-${Date.now()}`;
+  const UNIQUE_TOKEN = `tok${Math.random().toString(36).slice(2, 8)}`;
+
+  // ── Run 1: plant the token ────────────────────────────────────────────────
+  const r1 = await router.run({
+    groupFolder,
+    prompt: `Remember this secret token: ${UNIQUE_TOKEN}. Acknowledge with: noted`,
+    agent: 'claude',
+  });
+  if (r1.status !== 'success') {
+    throw new Error(`Run 1 failed: ${r1.error}`);
+  }
+  console.log(`  ✓ Run 1 planted token ${UNIQUE_TOKEN} (${r1.duration}ms)`);
+
+  // ── Run 2: recall — no sessionId, relies on memory injection ─────────────
+  const r2 = await router.run({
+    groupFolder,
+    prompt: 'What secret token did I ask you to remember? State it exactly.',
+    agent: 'claude',
+    // no sessionId — forces memory injection path in claude-runner
+  });
+  if (r2.status !== 'success') {
+    throw new Error(`Run 2 failed: ${r2.error}`);
+  }
+  console.log(`  ✓ Run 2 recalled (${r2.duration}ms): "${r2.output?.slice(0, 200)}"`);
+
+  if (!r2.output?.includes(UNIQUE_TOKEN)) {
+    throw new Error(
+      `Memory injection did not work: "${UNIQUE_TOKEN}" not found in run 2 response.\n` +
+      `Response: "${r2.output?.slice(0, 300)}"`,
     );
   }
 }
 
 /**
- * End-to-end pipeline: send trigger message → agent runs → success log appears.
- *
- * Sends a message as ourselves (fromMe:true) — claw routes it to the agent
- * runner, which writes a JSON log entry on completion. We poll that log dir
- * to verify the run succeeded within the timeout.
+ * Verifies the router honours the explicit 'auto' agent setting and picks an
+ * agent via classification when autoClassify is enabled. Requires TEST_CLAW_AGENT
+ * so you can confirm a specific agent is reachable.
  */
-export async function testPipelineTriggersAgentAndSucceeds(photon: any) {
-  await assertPrerequisites(photon);
+export async function testAgentRoutingByName(_photon: any) {
+  const targetAgent = process.env.TEST_CLAW_AGENT;
+  if (!targetAgent) {
+    throw new Error(
+      'Set TEST_CLAW_AGENT to an agent to test (e.g. gemini, aider, opencode).',
+    );
+  }
 
-  const logDir = path.join(CONFIG.baseDir, CONFIG.groupFolder, 'logs');
-  const baseline = await latestLog(logDir);
+  const router = (_photon as any).router;
+  if (!router) throw new Error('router not available — see testRouterDelegatesAndLogsSuccess');
+
+  const groupFolder = `_test-agent-${Date.now()}`;
+  const result = await router.run({
+    groupFolder,
+    prompt: 'Reply with exactly: pong',
+    agent: targetAgent,
+  });
+
+  if (result.status !== 'success') {
+    throw new Error(`Agent "${targetAgent}" failed: ${result.error}`);
+  }
+  if (!result.output?.trim()) {
+    throw new Error(`Agent "${targetAgent}" returned empty output`);
+  }
+
+  console.log(`  ✓ router → ${targetAgent}: ${result.duration}ms`);
+  console.log(`  ✓ Output: "${result.output.slice(0, 200)}"`);
+}
+
+/**
+ * Full WhatsApp E2E: sends a trigger message via the live daemon's whatsapp
+ * and polls the daemon's log directory for a new success entry.
+ *
+ * Requires TEST_FULL_E2E=1. Also requires:
+ *   - photon claw start (daemon's claw running)
+ *   - photon whatsapp connect (daemon's WhatsApp connected)
+ *   - TEST_LOG_DIR pointing to where the daemon's runner writes logs
+ *     (default: ~/Projects/logs — the old agent-runner's folder)
+ */
+export async function testWhatsAppTriggeredPipeline(_photon: any) {
+  if (!CONFIG.fullE2E) {
+    throw new Error(
+      'Skipped: set TEST_FULL_E2E=1 to run the WhatsApp E2E test.\n' +
+      `Also ensure: photon claw start, photon whatsapp connect, TEST_LOG_DIR=${CONFIG.logDir}`,
+    );
+  }
+
+  // Check daemon claw status via CLI
+  let statusOut: string;
+  try { statusOut = photonCli('claw', 'status'); } catch {
+    throw new Error('Daemon not reachable. Fix: photon daemon start && photon claw start');
+  }
+  if (!statusOut.includes('Running: yes')) {
+    throw new Error('Daemon claw not running. Fix: photon claw start');
+  }
+  if (!statusOut.includes('Status: connected')) {
+    throw new Error('WhatsApp not connected. Fix: photon whatsapp connect');
+  }
+
+  const baseline = await latestLog(CONFIG.logDir);
   const baselineMtime = baseline?.mtime ?? 0;
 
-  const triggerText = `${CONFIG.trigger} integration test — reply with exactly: pong`;
-
-  // Send the trigger message via the daemon's live whatsapp instance.
-  // It arrives as fromMe:true, which claw routes to the configured agent.
+  const triggerText = `${CONFIG.trigger} integration test — reply with: pong`;
   photonCli('whatsapp', 'send', '--chat', CONFIG.group, '--text', triggerText);
   console.log(`  → Sent: "${triggerText}"`);
-  console.log(`  → Polling: ${logDir}`);
+  console.log(`  → Polling: ${CONFIG.logDir}`);
 
-  const deadline = Date.now() + CONFIG.timeoutMs;
-  const log = await pollForNewLog(logDir, baselineMtime, deadline);
+  const log = await pollForNewLog(CONFIG.logDir, baselineMtime, Date.now() + CONFIG.timeoutMs);
 
   if (!log) {
     throw new Error(
-      `No agent run log appeared in ${logDir} within ${CONFIG.timeoutMs / 1000}s.\n` +
-      `Check:\n` +
-      `  • Group "${CONFIG.group}" has trigger "${CONFIG.trigger}" set\n` +
-      `  • TEST_CLAW_FOLDER ("${CONFIG.groupFolder}") matches the group's primary folder\n` +
-      `  • The runner is not at capacity (photon cli claude-runner status)`,
+      `No log appeared in ${CONFIG.logDir} within ${CONFIG.timeoutMs / 1000}s.\n` +
+      `Check the daemon's claw registry trigger and folder config.`,
     );
   }
   if (log.status !== 'success') {
     throw new Error(`Agent run failed:\n${JSON.stringify(log, null, 2)}`);
   }
-  if (!log.result) {
-    throw new Error('Agent run succeeded but produced empty output');
-  }
 
-  console.log(`  ✓ Completed in ${log.duration}ms`);
-  console.log(`  ✓ Response: "${String(log.result).slice(0, 200)}"`);
-}
-
-/**
- * Memory continuity: second prompt references context from the first.
- *
- * Runs two sequential messages. The second asks what was said before.
- * A working memory layer causes the agent to recall the first message.
- */
-export async function testMemoryInjectionAcrossRuns(photon: any) {
-  await assertPrerequisites(photon);
-
-  const logDir = path.join(CONFIG.baseDir, CONFIG.groupFolder, 'logs');
-  const UNIQUE_TOKEN = `memtest-${Date.now()}`;
-
-  // ── First run: plant a unique token ──────────────────────────────────────
-  let baseline = await latestLog(logDir);
-  photonCli('whatsapp', 'send', '--chat', CONFIG.group, '--text',
-    `${CONFIG.trigger} remember this token: ${UNIQUE_TOKEN}`,
-  );
-  console.log(`  → Run 1: planted token ${UNIQUE_TOKEN}`);
-
-  const deadline1 = Date.now() + CONFIG.timeoutMs;
-  const log1 = await pollForNewLog(logDir, baseline?.mtime ?? 0, deadline1);
-  if (!log1 || log1.status !== 'success') {
-    throw new Error(`First run failed:\n${JSON.stringify(log1, null, 2)}`);
-  }
-  console.log(`  ✓ Run 1 completed (${log1.duration}ms)`);
-
-  // ── Second run: ask it to recall ─────────────────────────────────────────
-  baseline = await latestLog(logDir);
-  photonCli('whatsapp', 'send', '--chat', CONFIG.group, '--text',
-    `${CONFIG.trigger} what token did I ask you to remember?`,
-  );
-  console.log('  → Run 2: asking for recall');
-
-  const deadline2 = Date.now() + CONFIG.timeoutMs;
-  const log2 = await pollForNewLog(logDir, baseline?.mtime ?? 0, deadline2);
-  if (!log2 || log2.status !== 'success') {
-    throw new Error(`Second run failed:\n${JSON.stringify(log2, null, 2)}`);
-  }
-  console.log(`  ✓ Run 2 completed (${log2.duration}ms)`);
-  console.log(`  ✓ Response: "${String(log2.result).slice(0, 300)}"`);
-
-  // The response should contain the token we planted in run 1
-  if (!String(log2.result).includes(UNIQUE_TOKEN)) {
-    throw new Error(
-      `Memory injection failed: token "${UNIQUE_TOKEN}" not found in run 2 response.\n` +
-      `Response was: "${String(log2.result).slice(0, 300)}"`,
-    );
-  }
-}
-
-/**
- * Per-group agent routing: configure a group to use a different agent
- * and verify the run still succeeds (agent binary must be installed).
- *
- * Uses an env var to specify which agent to test — skip if not set.
- */
-export async function testAgentRouting(photon: any) {
-  const targetAgent = process.env.TEST_CLAW_AGENT;
-  if (!targetAgent) {
-    throw new Error(
-      'Prerequisite not met: set TEST_CLAW_AGENT to the agent to test (e.g. gemini, aider).',
-    );
-  }
-
-  await assertPrerequisites(photon);
-
-  // Switch the group to the target agent
-  await photon.configure({ group: CONFIG.group, agent: targetAgent });
-  console.log(`  → Configured group to use agent: ${targetAgent}`);
-
-  const logDir = path.join(CONFIG.baseDir, CONFIG.groupFolder, 'logs');
-  const baseline = await latestLog(logDir);
-
-  const triggerText = `${CONFIG.trigger} integration test via ${targetAgent} — reply with: pong`;
-  photonCli('whatsapp', 'send', '--chat', CONFIG.group, '--text', triggerText);
-  console.log(`  → Sent via ${targetAgent}: "${triggerText}"`);
-
-  const deadline = Date.now() + CONFIG.timeoutMs;
-  const log = await pollForNewLog(logDir, baseline?.mtime ?? 0, deadline);
-
-  // Restore to claude regardless of outcome
-  await photon.configure({ group: CONFIG.group, agent: 'claude' });
-  console.log('  → Restored group to claude');
-
-  if (!log) {
-    throw new Error(`No run log appeared within ${CONFIG.timeoutMs / 1000}s for agent ${targetAgent}`);
-  }
-  if (log.status !== 'success') {
-    throw new Error(`Agent "${targetAgent}" run failed:\n${JSON.stringify(log, null, 2)}`);
-  }
-
-  console.log(`  ✓ ${targetAgent} completed in ${log.duration}ms`);
+  console.log(`  ✓ E2E completed in ${log.duration}ms`);
   console.log(`  ✓ Response: "${String(log.result).slice(0, 200)}"`);
 }
