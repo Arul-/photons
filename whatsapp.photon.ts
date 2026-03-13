@@ -15,15 +15,17 @@ import makeWASocket, {
 
 import { Photon } from '@portel/photon-core';
 
-// Logger is initialized lazily in _makeLogger() to respect the settings.debug flag
-const silentLogger = pino({ level: 'silent' });
+// Logger is initialized lazily to respect the settings.debug flag.
+// Use 'fatal' instead of 'silent' — Baileys internally checks logger.level
+// and some code paths bypass 'silent' by writing to child loggers.
+const silentLogger = pino({ level: 'fatal' });
 const debugLogger = pino({ level: 'debug' });
 
 /** Max age for queued messages before they're dropped on flush (1 hour) */
 const MESSAGE_TTL_MS = 60 * 60 * 1000;
 
 /** Directory for downloaded media files */
-const MEDIA_DIR = path.join(os.homedir(), '.photon', 'whatsapp', 'media');
+const MEDIA_DIR = path.join(os.homedir(), '.photon', 'data', 'whatsapp', 'media');
 
 /**
  * WhatsApp — live WhatsApp connection via Baileys.
@@ -50,6 +52,12 @@ export default class WhatsApp extends Photon {
   private qrPending = false;
   private phoneNumber = '';
   private reconnectAttempts = 0;
+  /** Tracks successful connections to avoid resetting backoff on flapping */
+  private _lastConnectedAt = 0;
+  /** Minimum interval between successful connections before resetting backoff (5 min) */
+  private readonly _stableConnectionMs = 5 * 60 * 1000;
+  /** Whether initial group sync has been done this session */
+  private _groupsSynced = false;
   private outgoingQueue: Array<{ jid: string; text: string; queuedAt: number }> = [];
   private flushing = false;
   private knownGroups: Record<string, string> = {}; // jid → name
@@ -65,13 +73,13 @@ export default class WhatsApp extends Photon {
     resolvedJid?: string; // cached JID from group name lookup
   }> = [];
 
-  /** Pass a custom auth directory, or leave empty to use ~/.photon/whatsapp/auth */
+  /** Pass a custom auth directory, or leave empty to use ~/.photon/data/whatsapp/auth */
   constructor(private _authDir: string = '') {
     super();
   }
 
   private get authDir(): string {
-    return this._authDir || path.join(os.homedir(), '.photon', 'whatsapp', 'auth');
+    return this._authDir || path.join(os.homedir(), '.photon', 'data', 'whatsapp', 'auth');
   }
 
   private get _logger() {
@@ -95,6 +103,8 @@ export default class WhatsApp extends Photon {
       this._lastQR = old._lastQR || null;
       this._connectPromise = old._connectPromise || null;
       this.reconnectAttempts = old.reconnectAttempts || 0;
+      this._lastConnectedAt = old._lastConnectedAt || 0;
+      this._groupsSynced = old._groupsSynced || false;
       this._rebuildGroupIndex();
 
       // Mark old instance as destroyed so its stale timers don't interfere
@@ -160,7 +170,7 @@ export default class WhatsApp extends Photon {
     message?: string;
   }> {
     if (this.connected) {
-      throw new Error(`Already connected as +${this.phoneNumber}`);
+      return { status: 'already_connected' as const, phone: this.phoneNumber, message: `Already connected as +${this.phoneNumber}. No action needed.` };
     }
     // Deduplicate concurrent connect() calls — return same promise
     if (this._connectPromise) {
@@ -182,7 +192,7 @@ export default class WhatsApp extends Photon {
           keys: makeCacheableSignalKeyStore(state.keys, this._logger),
         },
         printQRInTerminal: false,
-        browser: Browsers.macOS('Chrome'),
+        browser: Browsers.macOS('Desktop'),
         logger: this._logger,
       });
 
@@ -707,15 +717,21 @@ export default class WhatsApp extends Photon {
         }
 
         this.reconnectAttempts++;
-        const baseDelay = isRateLimited ? 30_000 : 1000;
-        const delay = Math.min(baseDelay * 2 ** Math.min(this.reconnectAttempts - 1, 6), 120_000);
+        const baseDelay = isRateLimited ? 30_000 : 5_000; // 5s minimum (was 1s)
+        const delay = Math.min(baseDelay * 2 ** Math.min(this.reconnectAttempts - 1, 5), 120_000);
         setTimeout(() => this._reconnect().catch((err: any) => {
           this.emit({ type: 'error', source: 'reconnect', error: err.message });
         }), delay);
       } else if (connection === 'open') {
         this.connected = true;
         this.qrPending = false;
-        this.reconnectAttempts = 0;
+
+        // Only reset backoff if connection was stable (not flapping)
+        const now = Date.now();
+        if (now - this._lastConnectedAt > this._stableConnectionMs) {
+          this.reconnectAttempts = 0;
+        }
+        this._lastConnectedAt = now;
 
         if (this.sock?.user) {
           this.phoneNumber = this.sock.user.id.split(':')[0];
@@ -726,12 +742,19 @@ export default class WhatsApp extends Photon {
         this._flushQueue().catch((err: any) => {
           this.emit({ type: 'error', source: 'flush_queue', error: err.message });
         });
-        this._syncGroups().catch((err: any) => {
-          this.emit({ type: 'error', source: 'sync_groups', error: err.message });
-        });
-        this.sock?.sendPresenceUpdate('available').catch((err: any) => {
-          this.emit({ type: 'error', source: 'presence', error: err.message });
-        });
+        // Only sync groups once per session — avoids repeated sync notifications on phone
+        if (!this._groupsSynced) {
+          this._groupsSynced = true;
+          this._syncGroups().catch((err: any) => {
+            this.emit({ type: 'error', source: 'sync_groups', error: err.message });
+          });
+        }
+        // Skip presence update on reconnects — reduces phone notifications
+        if (this.reconnectAttempts === 0) {
+          this.sock?.sendPresenceUpdate('available').catch((err: any) => {
+            this.emit({ type: 'error', source: 'presence', error: err.message });
+          });
+        }
       }
     });
 
@@ -950,7 +973,7 @@ export default class WhatsApp extends Photon {
         keys: makeCacheableSignalKeyStore(state.keys, this._logger),
       },
       printQRInTerminal: false,
-      browser: Browsers.macOS('Chrome'),
+      browser: Browsers.macOS('Desktop'),
       logger: this._logger,
     });
 
