@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="mcp:ui-size" content="minWidth=900;minHeight=500;maxHeight=900">
+  <title>Claw Pipeline</title>
+  <style>
+    :root {
+      --bg-primary: #0d0d0d;
+      --bg-secondary: #1a1a1a;
+      --bg-tertiary: #262626;
+      --bg-card: #1e1e1e;
+      --text-primary: #e6e6e6;
+      --text-secondary: #a0a0a0;
+      --text-muted: #666;
+      --border-color: #333;
+      --accent: #ef4444;
+      --accent-hover: #dc2626;
+      --accent-dim: rgba(239, 68, 68, 0.15);
+      --green: #10b981;
+      --green-dim: rgba(16, 185, 129, 0.15);
+      --yellow: #f59e0b;
+      --yellow-dim: rgba(245, 158, 11, 0.15);
+      --blue: #3b82f6;
+      --blue-dim: rgba(59, 130, 246, 0.15);
+      --purple: #8b5cf6;
+      --purple-dim: rgba(139, 92, 246, 0.15);
+      --orange: #f97316;
+      --orange-dim: rgba(249, 115, 22, 0.15);
+    }
+
+    :root.light {
+      --bg-primary: #f4f4f5;
+      --bg-secondary: #fafafa;
+      --bg-tertiary: #e4e4e7;
+      --bg-card: #ffffff;
+      --text-primary: #18181b;
+      --text-secondary: #52525b;
+      --text-muted: #a1a1aa;
+      --border-color: #d4d4d8;
+      --accent-dim: rgba(239, 68, 68, 0.1);
+      --green-dim: rgba(16, 185, 129, 0.1);
+      --yellow-dim: rgba(245, 158, 11, 0.1);
+      --blue-dim: rgba(59, 130, 246, 0.1);
+      --purple-dim: rgba(139, 92, 246, 0.1);
+      --orange-dim: rgba(249, 115, 22, 0.1);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { margin: 0; padding: 0; overflow: hidden; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-color);
+      background: var(--bg-secondary);
+      flex-shrink: 0;
+    }
+
+    .header-left { display: flex; align-items: center; gap: 12px; }
+
+    .header h1 { font-size: 18px; font-weight: 600; }
+
+    .pipeline-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .pipeline-badge.running { background: var(--green-dim); color: var(--green); }
+    .pipeline-badge.stopped { background: var(--accent-dim); color: var(--accent); }
+
+    .pipeline-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: currentColor;
+    }
+
+    .pipeline-badge.running .pipeline-dot { animation: pulse 2s ease-in-out infinite; }
+
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    .header-actions { display: flex; gap: 8px; }
+
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 14px; border-radius: 6px; font-size: 13px;
+      font-weight: 500; border: 1px solid var(--border-color);
+      background: var(--bg-tertiary); color: var(--text-primary);
+      cursor: pointer; transition: all 0.15s ease;
+    }
+    .btn:hover { background: var(--border-color); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-start { background: var(--green); color: #fff; border-color: var(--green); }
+    .btn-start:hover { background: #0ea472; }
+    .btn-stop { background: var(--accent-dim); color: var(--accent); border-color: transparent; }
+    .btn-stop:hover { background: var(--accent); color: #fff; }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+    /* ── Stats ── */
+    .stats-bar {
+      display: flex; gap: 20px; padding: 10px 16px;
+      border-bottom: 1px solid var(--border-color);
+      background: var(--bg-secondary); font-size: 13px;
+    }
+
+    .stat { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); }
+    .stat .value { font-weight: 600; color: var(--text-primary); }
+    .stat .dot { width: 8px; height: 8px; border-radius: 50%; }
+
+    /* ── Main Layout ── */
+    .main { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── Group List (left) ── */
+    .group-list {
+      width: 320px; border-right: 1px solid var(--border-color);
+      background: var(--bg-secondary); display: flex; flex-direction: column; flex-shrink: 0;
+      overflow-y: auto;
+    }
+
+    .group-list-header {
+      padding: 10px 12px; border-bottom: 1px solid var(--border-color);
+      font-size: 12px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.5px; color: var(--text-muted);
+    }
+
+    .group-card {
+      padding: 12px; border-bottom: 1px solid var(--border-color);
+      cursor: pointer; transition: background 0.1s;
+    }
+    .group-card:hover { background: var(--bg-tertiary); }
+    .group-card.selected { background: var(--accent-dim); border-left: 3px solid var(--accent); }
+
+    .group-card-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 6px;
+    }
+
+    .group-card-name {
+      font-size: 14px; font-weight: 600;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    .agent-badge {
+      font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 500;
+    }
+    .agent-badge.claude { background: var(--orange-dim); color: var(--orange); }
+    .agent-badge.gemini { background: var(--blue-dim); color: var(--blue); }
+    .agent-badge.aider { background: var(--purple-dim); color: var(--purple); }
+    .agent-badge.auto { background: var(--yellow-dim); color: var(--yellow); }
+
+    .group-card-meta {
+      display: flex; gap: 10px; font-size: 12px; color: var(--text-muted);
+    }
+
+    .trigger-tag {
+      font-family: monospace; background: var(--bg-tertiary);
+      padding: 1px 6px; border-radius: 3px; font-size: 11px; color: var(--text-secondary);
+    }
+
+    /* ── Detail Panel (right) ── */
+    .detail { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+    .detail-header {
+      padding: 16px; border-bottom: 1px solid var(--border-color);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .detail-header h2 { font-size: 18px; font-weight: 600; }
+    .detail-actions { display: flex; gap: 8px; }
+
+    .detail-body { flex: 1; overflow-y: auto; padding: 16px; }
+
+    /* ── Config Section ── */
+    .config-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px;
+    }
+
+    .config-item {
+      background: var(--bg-card); border: 1px solid var(--border-color);
+      border-radius: 8px; padding: 12px;
+    }
+
+    .config-label {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 4px;
+    }
+
+    .config-value { font-size: 14px; font-weight: 500; }
+
+    .folder-list {
+      display: flex; flex-wrap: wrap; gap: 4px;
+    }
+
+    .folder-tag {
+      font-size: 12px; background: var(--blue-dim); color: var(--blue);
+      padding: 2px 8px; border-radius: 4px;
+    }
+
+    .sender-list {
+      display: flex; flex-wrap: wrap; gap: 4px;
+    }
+
+    .sender-tag {
+      font-size: 12px; background: var(--bg-tertiary);
+      padding: 2px 8px; border-radius: 4px; color: var(--text-secondary);
+    }
+
+    /* ── Health Panel ── */
+    .health-panel {
+      background: var(--bg-card); border: 1px solid var(--border-color);
+      border-radius: 8px; padding: 14px; margin-bottom: 20px;
+    }
+
+    .health-panel h3 {
+      font-size: 13px; font-weight: 600; margin-bottom: 10px;
+      text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted);
+    }
+
+    .health-grid {
+      display: flex; gap: 16px;
+    }
+
+    .health-item {
+      display: flex; align-items: center; gap: 8px; font-size: 13px;
+    }
+
+    .health-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+    }
+    .health-dot.ok { background: var(--green); }
+    .health-dot.warn { background: var(--yellow); }
+    .health-dot.error { background: var(--accent); }
+
+    /* ── Empty State ── */
+    .empty-state {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; height: 100%; gap: 16px; color: var(--text-muted);
+    }
+    .empty-state .icon { font-size: 48px; opacity: 0.5; }
+    .empty-state p { font-size: 14px; text-align: center; max-width: 320px; line-height: 1.5; }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed; bottom: 16px; right: 16px;
+      padding: 10px 16px; border-radius: 8px; font-size: 13px; font-weight: 500;
+      background: var(--bg-card); border: 1px solid var(--border-color);
+      color: var(--text-primary); box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      transform: translateY(100px); opacity: 0; transition: all 0.3s ease; z-index: 100;
+    }
+    .toast.visible { transform: translateY(0); opacity: 1; }
+    .toast.success { border-color: var(--green); }
+    .toast.error { border-color: var(--accent); }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <h1>Claw Pipeline</h1>
+      <div class="pipeline-badge stopped" id="pipelineBadge">
+        <span class="pipeline-dot"></span>
+        <span id="pipelineText">Stopped</span>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="btn" id="refreshBtn">Refresh</button>
+      <button class="btn btn-start" id="startStopBtn">Start</button>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-bar">
+    <div class="stat"><span class="dot" style="background:var(--green)"></span> WhatsApp <span class="value" id="waStatus">unknown</span></div>
+    <div class="stat">Runner <span class="value" id="runnerStatus">—</span></div>
+    <div class="stat">Groups <span class="value" id="groupCountStat">0</span></div>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+    <!-- Group List -->
+    <div class="group-list">
+      <div class="group-list-header">Registered Groups</div>
+      <div id="groupCards">
+        <div class="empty-state" style="padding: 40px 16px;">
+          <span class="icon">🦞</span>
+          <p>No groups registered. Use <code>claw register</code> to add groups.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Detail Panel -->
+    <div class="detail" id="detailPanel">
+      <div class="empty-state" id="detailEmpty">
+        <span class="icon">🦞</span>
+        <p>Select a group to view its configuration and controls</p>
+      </div>
+
+      <div id="detailContent" style="display: none;">
+        <div class="detail-header">
+          <h2 id="detailGroupName">Group Name</h2>
+          <div class="detail-actions">
+            <button class="btn btn-sm" id="resetBtn">Reset Session</button>
+            <button class="btn btn-sm" id="clearLogBtn">Clear Log</button>
+            <button class="btn btn-sm btn-stop" id="unregisterBtn">Unregister</button>
+          </div>
+        </div>
+
+        <div class="detail-body">
+          <!-- Health -->
+          <div class="health-panel" id="healthPanel">
+            <h3>Health</h3>
+            <div class="health-grid" id="healthGrid">
+              <div class="health-item"><span class="health-dot" id="healthDot"></span> <span id="healthLabel">Checking...</span></div>
+              <div class="health-item" style="color: var(--text-muted);" id="healthTime"></div>
+            </div>
+          </div>
+
+          <!-- Config -->
+          <div class="config-grid" id="configGrid"></div>
+
+          <!-- Senders -->
+          <div class="config-item" style="margin-bottom: 20px;" id="sendersSection">
+            <div class="config-label">Allowed Senders</div>
+            <div class="sender-list" id="sendersList"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script>
+    let state = {
+      running: false,
+      whatsapp: null,
+      runner: null,
+      groups: [],
+      health: null,
+      selectedGroup: null,
+    };
+
+    const $ = id => document.getElementById(id);
+
+    function parseMCP(raw) {
+      if (raw && raw.content && Array.isArray(raw.content)) {
+        const item = raw.content.find(c => c.type === 'text' && c.text);
+        if (item) { try { return JSON.parse(item.text); } catch(e) { return item.text; } }
+      }
+      return raw;
+    }
+
+    let toastTimer;
+    function toast(msg, type = 'info') {
+      const el = $('toast');
+      el.textContent = msg;
+      el.className = 'toast visible ' + type;
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => el.className = 'toast', 3000);
+    }
+
+    function escapeHtml(s) {
+      const d = document.createElement('div'); d.textContent = s; return d.innerHTML;
+    }
+
+    function timeAgo(iso) {
+      if (!iso) return 'Never';
+      const diff = Date.now() - new Date(iso).getTime();
+      const secs = Math.floor(diff / 1000);
+      if (secs < 60) return secs + 's ago';
+      const mins = Math.floor(secs / 60);
+      if (mins < 60) return mins + 'm ago';
+      return Math.floor(mins / 60) + 'h ago';
+    }
+
+    // ── Render ──
+
+    function renderHeader() {
+      const badge = $('pipelineBadge');
+      const text = $('pipelineText');
+      const btn = $('startStopBtn');
+
+      if (state.running) {
+        badge.className = 'pipeline-badge running';
+        text.textContent = 'Running';
+        btn.textContent = 'Stop';
+        btn.className = 'btn btn-stop';
+      } else {
+        badge.className = 'pipeline-badge stopped';
+        text.textContent = 'Stopped';
+        btn.textContent = 'Start';
+        btn.className = 'btn btn-start';
+      }
+
+      const waStatus = state.whatsapp?.status || 'unknown';
+      $('waStatus').textContent = waStatus;
+
+      const runner = state.runner;
+      if (runner && typeof runner === 'object') {
+        $('runnerStatus').textContent = 'active:' + (runner.totalActive || 0) + ' queued:' + (runner.totalQueued || 0);
+      } else {
+        $('runnerStatus').textContent = '—';
+      }
+
+      $('groupCountStat').textContent = state.groups.length;
+    }
+
+    function renderGroups() {
+      const container = $('groupCards');
+
+      if (state.groups.length === 0) {
+        container.innerHTML = '<div class="empty-state" style="padding: 40px 16px;">' +
+          '<span class="icon">🦞</span>' +
+          '<p>No groups registered. Use <code>claw register</code> to add groups.</p></div>';
+        return;
+      }
+
+      container.innerHTML = state.groups.map(g => {
+        const sel = state.selectedGroup === g.name ? ' selected' : '';
+        const agentClass = g.agent || 'claude';
+        return '<div class="group-card' + sel + '" data-name="' + escapeHtml(g.name) + '">' +
+          '<div class="group-card-header">' +
+            '<span class="group-card-name">' + escapeHtml(g.name) + '</span>' +
+            '<span class="agent-badge ' + agentClass + '">' + (g.agent || 'claude') + '</span>' +
+          '</div>' +
+          '<div class="group-card-meta">' +
+            (g.trigger ? '<span class="trigger-tag">' + escapeHtml(g.trigger) + '</span>' : '<span style="color:var(--text-muted)">participant mode</span>') +
+            '<span>' + (g.folders || []).length + ' folder(s)</span>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+
+      container.querySelectorAll('.group-card').forEach(el => {
+        el.addEventListener('click', () => selectGroup(el.dataset.name));
+      });
+    }
+
+    function renderDetail() {
+      if (!state.selectedGroup) {
+        $('detailEmpty').style.display = 'flex';
+        $('detailContent').style.display = 'none';
+        return;
+      }
+
+      $('detailEmpty').style.display = 'none';
+      $('detailContent').style.display = 'flex';
+
+      const g = state.groups.find(x => x.name === state.selectedGroup);
+      if (!g) return;
+
+      $('detailGroupName').textContent = g.name;
+
+      // Config grid
+      const folders = (g.folders || []).map(f => '<span class="folder-tag">' + escapeHtml(f) + '</span>').join('');
+      $('configGrid').innerHTML =
+        '<div class="config-item"><div class="config-label">Trigger</div><div class="config-value">' +
+          (g.trigger ? '<span class="trigger-tag">' + escapeHtml(g.trigger) + '</span>' + (g.requiresTrigger ? ' (required)' : ' (optional)') : 'Participant mode (no trigger)') +
+        '</div></div>' +
+        '<div class="config-item"><div class="config-label">Agent</div><div class="config-value"><span class="agent-badge ' + (g.agent || 'claude') + '">' + (g.agent || 'claude') + '</span></div></div>' +
+        '<div class="config-item"><div class="config-label">Folders</div><div class="config-value"><div class="folder-list">' + (folders || '<span style="color:var(--text-muted)">None</span>') + '</div></div></div>' +
+        '<div class="config-item"><div class="config-label">Added</div><div class="config-value">' + (g.addedAt ? timeAgo(g.addedAt) : '—') + '</div></div>' +
+        (g.systemPrompt ? '<div class="config-item" style="grid-column: span 2;"><div class="config-label">System Prompt</div><div class="config-value" style="font-size: 13px; color: var(--text-secondary); line-height: 1.4;">' + escapeHtml(g.systemPrompt) + '</div></div>' : '');
+
+      // Senders
+      const senders = (g.allowedSenders || []);
+      $('sendersList').innerHTML = senders.length > 0
+        ? senders.map(s => '<span class="sender-tag">+' + s + '</span>').join('')
+        : '<span style="color: var(--text-muted); font-size: 13px;">All senders allowed</span>';
+
+      // Health
+      renderHealth();
+    }
+
+    function renderHealth() {
+      const h = state.health;
+      if (!h) {
+        $('healthDot').className = 'health-dot';
+        $('healthLabel').textContent = 'No health data';
+        $('healthTime').textContent = '';
+        return;
+      }
+
+      $('healthDot').className = 'health-dot ' + (h.ok ? 'ok' : 'error');
+      $('healthLabel').textContent = h.ok ? 'Healthy' : 'Issues detected';
+      $('healthTime').textContent = h.checkedAt ? 'Last check: ' + timeAgo(h.checkedAt) : '';
+    }
+
+    // ── Actions ──
+
+    async function loadStatus() {
+      try {
+        const raw = await window.photon.callTool('status', {});
+        const data = parseMCP(raw);
+        if (data && typeof data === 'object') {
+          state.running = data.running || false;
+          state.whatsapp = data.whatsapp || null;
+          state.runner = data.runner || null;
+          state.groups = data.groups || [];
+          renderHeader();
+          renderGroups();
+          renderDetail();
+        }
+      } catch (e) {
+        console.error('Status failed:', e);
+      }
+    }
+
+    async function loadHealth() {
+      try {
+        const raw = await window.photon.callTool('health', {});
+        state.health = parseMCP(raw);
+        renderHealth();
+      } catch (e) {
+        console.error('Health failed:', e);
+      }
+    }
+
+    function selectGroup(name) {
+      state.selectedGroup = name;
+      renderGroups();
+      renderDetail();
+    }
+
+    async function togglePipeline() {
+      const btn = $('startStopBtn');
+      btn.disabled = true;
+
+      if (state.running) {
+        try {
+          await window.photon.callTool('stop', {});
+          state.running = false;
+          renderHeader();
+          toast('Pipeline stopped', 'success');
+        } catch (e) { toast('Stop failed: ' + (e.message || e), 'error'); }
+      } else {
+        btn.textContent = 'Starting...';
+        try {
+          await window.photon.callTool('start', {});
+          state.running = true;
+          renderHeader();
+          toast('Pipeline started', 'success');
+          loadStatus(); // refresh group data
+        } catch (e) { toast('Start failed: ' + (e.message || e), 'error'); }
+      }
+      btn.disabled = false;
+      renderHeader();
+    }
+
+    async function resetSession() {
+      if (!state.selectedGroup) return;
+      try {
+        await window.photon.callTool('reset', { group: state.selectedGroup });
+        toast('Session reset for ' + state.selectedGroup, 'success');
+      } catch (e) { toast('Reset failed: ' + (e.message || e), 'error'); }
+    }
+
+    async function clearLog() {
+      if (!state.selectedGroup) return;
+      try {
+        await window.photon.callTool('clear', { group: state.selectedGroup });
+        toast('Log cleared for ' + state.selectedGroup, 'success');
+      } catch (e) { toast('Clear failed: ' + (e.message || e), 'error'); }
+    }
+
+    async function unregisterGroup() {
+      if (!state.selectedGroup) return;
+      try {
+        await window.photon.callTool('unregister', { group: state.selectedGroup });
+        state.groups = state.groups.filter(g => g.name !== state.selectedGroup);
+        state.selectedGroup = null;
+        renderGroups();
+        renderDetail();
+        renderHeader();
+        toast('Group unregistered', 'success');
+      } catch (e) { toast('Unregister failed: ' + (e.message || e), 'error'); }
+    }
+
+    // ── Events ──
+    $('startStopBtn').addEventListener('click', togglePipeline);
+    $('refreshBtn').addEventListener('click', () => { loadStatus(); loadHealth(); });
+    $('resetBtn').addEventListener('click', resetSession);
+    $('clearLogBtn').addEventListener('click', clearLog);
+    $('unregisterBtn').addEventListener('click', unregisterGroup);
+
+    // ── Theme ──
+    if (window.photon) {
+      if (window.photon.theme === 'light') document.documentElement.classList.add('light');
+      window.photon.onThemeChange(theme => {
+        document.documentElement.classList.toggle('light', theme === 'light');
+      });
+    }
+
+    // ── onResult ──
+    if (window.photon) {
+      window.photon.onResult((result) => {
+        const data = parseMCP(result);
+        if (!data || typeof data !== 'object') return;
+        // Status result
+        if ('running' in data && 'groups' in data) {
+          state.running = data.running || false;
+          state.whatsapp = data.whatsapp || null;
+          state.runner = data.runner || null;
+          state.groups = data.groups || [];
+          renderHeader();
+          renderGroups();
+          renderDetail();
+        }
+        // Health result
+        else if ('ok' in data && 'whatsapp' in data && 'runner' in data) {
+          state.health = data;
+          renderHealth();
+        }
+      });
+
+      loadStatus();
+      loadHealth();
+    }
+  </script>
+</body>
+</html>

@@ -13,6 +13,7 @@ import { Photon } from '@portel/photon-core';
  * @stateful
  * @photon whatsapp ./whatsapp.photon.ts
  * @photon router ./agent-router.photon.ts
+ * @ui dashboard ./ui/dashboard.html
  */
 export default class Claw extends Photon {
   private running = false;
@@ -541,7 +542,7 @@ export default class Claw extends Photon {
    * @title Status
    * @readOnly
    * @openWorld
-   * @format card
+   * @ui dashboard
    */
   async status(): Promise<{
     running: boolean;
