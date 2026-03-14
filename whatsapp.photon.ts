@@ -46,6 +46,8 @@ export default class WhatsApp extends Photon {
     debug: false,
     /** Max reconnect attempts before giving up */
     maxReconnectAttempts: 10,
+    /** Group metadata sync interval in minutes (0 = no periodic sync) */
+    syncIntervalMinutes: 30,
   };
 
   private sock: WASocket | null = null;
@@ -59,6 +61,7 @@ export default class WhatsApp extends Photon {
   private readonly _stableConnectionMs = 5 * 60 * 1000;
   /** Whether initial group sync has been done this session */
   private _groupsSynced = false;
+  private _syncTimer: ReturnType<typeof setInterval> | null = null;
   private outgoingQueue: Array<{ jid: string; text: string; queuedAt: number }> = [];
   private flushing = false;
   private knownGroups: Record<string, string> = {}; // jid → name
@@ -116,6 +119,9 @@ export default class WhatsApp extends Photon {
       this._lastConnectedAt = old._lastConnectedAt || 0;
       this._groupsSynced = old._groupsSynced || false;
       this._rebuildGroupIndex();
+      // Transfer sync timer — old one gets killed via _destroyed flag
+      if (old._syncTimer) clearInterval(old._syncTimer);
+      this._startPeriodicSync();
 
       // Mark old instance as destroyed so its stale timers don't interfere
       old._destroyed = true;
@@ -147,6 +153,9 @@ export default class WhatsApp extends Photon {
         this.emit({ type: 'auto_connect_failed', error: err.message });
       });
     }
+
+    // Periodic group metadata sync (avoids constant full syncs from Baileys)
+    this._startPeriodicSync();
   }
 
   async onShutdown(ctx?: { reason?: string }): Promise<void> {
@@ -160,6 +169,32 @@ export default class WhatsApp extends Photon {
     this.connected = false;
     this.sock?.end(undefined);
     this.sock = null;
+  }
+
+  /**
+   * WhatsApp Dashboard — connection management, messaging, group audit, and utilities.
+   *
+   * @title WhatsApp
+   * @ui dashboard
+   * @readOnly
+   * @closedWorld
+   */
+  async main(): Promise<{
+    status: 'connected' | 'disconnected' | 'qr_pending';
+    phone: string;
+    queuedMessages: number;
+    reconnectAttempts: number;
+    groupCount: number;
+    qr?: string;
+  }> {
+    return {
+      status: this.connected ? 'connected' : this.qrPending ? 'qr_pending' : 'disconnected',
+      phone: this.phoneNumber,
+      queuedMessages: this.outgoingQueue.length,
+      reconnectAttempts: this.reconnectAttempts,
+      groupCount: Object.keys(this.knownGroups).length,
+      ...(this._lastQR ? { qr: this._lastQR } : {}),
+    };
   }
 
   /**
@@ -204,6 +239,11 @@ export default class WhatsApp extends Photon {
         printQRInTerminal: false,
         browser: Browsers.macOS('Desktop'),
         logger: this._logger,
+        // Reduce sync traffic — we handle group sync ourselves on a schedule
+        syncFullHistory: false,
+        markOnlineOnConnect: false,
+        fireInitQueries: true,
+        shouldSyncHistoryMessage: () => false,
       });
 
       // Wire persistent event handlers (messages, creds, reconnect)
@@ -271,6 +311,7 @@ export default class WhatsApp extends Photon {
    */
   async disconnect(): Promise<void> {
     this.connected = false;
+    if (this._syncTimer) { clearInterval(this._syncTimer); this._syncTimer = null; }
     this.sock?.end(undefined);
     this.sock = null;
     this.emit({ type: 'disconnected' });
@@ -989,6 +1030,89 @@ export default class WhatsApp extends Photon {
     await this.sock.updateProfileStatus(params.text);
   }
 
+  // ─── Cleanup / Maintenance ─────────────────────────────────────
+
+  /**
+   * Clear chat history for groups to reclaim storage.
+   * Removes messages from your device — does not affect other participants.
+   *
+   * @title Cleanup Chats
+   * @destructive
+   * @openWorld
+   * @param chats Group names, JIDs, or 'all' to clear all groups {@example "all"}
+   * @param olderThanDays Only clear groups with no recent activity (days) {@min 0} {@default 0}
+   * @param dryRun Preview what would be cleared without actually clearing {@default false}
+   */
+  async cleanup(params: {
+    chats?: string | string[];
+    olderThanDays?: number;
+    dryRun?: boolean;
+  } = {}): Promise<Array<{ name: string; jid: string; cleared: boolean; reason?: string }>> {
+    if (!this.connected || !this.sock) throw new Error('Not connected');
+
+    const dryRun = params.dryRun ?? false;
+    const olderThanDays = params.olderThanDays ?? 0;
+    const cutoff = olderThanDays > 0 ? Date.now() - (olderThanDays * 86400 * 1000) : 0;
+
+    // Resolve target groups
+    let targets: Array<{ jid: string; name: string }> = [];
+
+    if (!params.chats || params.chats === 'all') {
+      // All groups
+      const fetched = await this.sock.groupFetchAllParticipating();
+      targets = Object.entries(fetched).map(([jid, meta]: [string, any]) => ({
+        jid,
+        name: meta.subject || jid,
+      }));
+    } else {
+      const chatList = Array.isArray(params.chats) ? params.chats : [params.chats];
+      for (const chat of chatList) {
+        const jid = await this._resolveJid(chat);
+        targets.push({ jid, name: this.knownGroups[jid] || jid });
+      }
+    }
+
+    // Filter by activity age if olderThanDays specified
+    const results: Array<{ name: string; jid: string; cleared: boolean; reason?: string }> = [];
+
+    for (const target of targets) {
+      // If filtering by age, check group creation/activity
+      if (cutoff > 0) {
+        try {
+          const meta = await this.sock!.groupMetadata(target.jid);
+          const created = (meta.creation || 0) * 1000;
+          // Skip recently created groups
+          if (created > cutoff) {
+            results.push({ name: target.name, jid: target.jid, cleared: false, reason: 'too recent' });
+            continue;
+          }
+        } catch {
+          // Can't check metadata, skip
+          results.push({ name: target.name, jid: target.jid, cleared: false, reason: 'metadata error' });
+          continue;
+        }
+      }
+
+      if (dryRun) {
+        results.push({ name: target.name, jid: target.jid, cleared: false, reason: 'dry run' });
+        continue;
+      }
+
+      try {
+        await this.sock!.chatModify(
+          { clear: true, lastMessages: [{ key: { remoteJid: target.jid, fromMe: false, id: '' }, messageTimestamp: 0 }] },
+          target.jid,
+        );
+        results.push({ name: target.name, jid: target.jid, cleared: true });
+      } catch (err: any) {
+        results.push({ name: target.name, jid: target.jid, cleared: false, reason: err.message });
+      }
+    }
+
+    this.emit({ type: 'cleanup_complete', cleared: results.filter(r => r.cleared).length, total: results.length, dryRun });
+    return results;
+  }
+
   // ─── Internal ──────────────────────────────────────────────────
 
   private _rebuildGroupIndex(): void {
@@ -1343,6 +1467,10 @@ export default class WhatsApp extends Photon {
       printQRInTerminal: false,
       browser: Browsers.macOS('Desktop'),
       logger: this._logger,
+      syncFullHistory: false,
+      markOnlineOnConnect: false,
+      fireInitQueries: true,
+      shouldSyncHistoryMessage: () => false,
     });
 
     this._wireSocketEvents(saveCreds);
@@ -1390,6 +1518,19 @@ export default class WhatsApp extends Photon {
     } catch (err: any) {
       this.emit({ type: 'error', source: 'sync_groups', error: err.message });
     }
+  }
+
+  private _startPeriodicSync(): void {
+    if (this._syncTimer) clearInterval(this._syncTimer);
+    const minutes = this.settings.syncIntervalMinutes;
+    if (minutes <= 0) return;
+    this._syncTimer = setInterval(() => {
+      if (this.connected && this.sock) {
+        this._syncGroups().catch((err: any) => {
+          this.emit({ type: 'error', source: 'periodic_sync', error: err.message });
+        });
+      }
+    }, minutes * 60 * 1000);
   }
 }
 

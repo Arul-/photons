@@ -36,6 +36,25 @@ export default class AgentRouter extends Photon {
   };
 
   /**
+   * Agent Router Dashboard — view all agent statuses and routing config.
+   *
+   * @title Agent Router
+   * @ui dashboard
+   * @readOnly
+   * @closedWorld
+   */
+  async main(): Promise<{
+    claude: any;
+    gemini: any;
+    aider: any;
+    opencode: any;
+    totalActive: number;
+    totalQueued: number;
+  }> {
+    return this.status();
+  }
+
+  /**
    * Route a prompt to the appropriate agent runner.
    * Uses the explicit `agent` param, auto-classifies if enabled,
    * or falls back to the defaultAgent setting.

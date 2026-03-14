@@ -37,6 +37,22 @@ export default class AgentRunner extends Photon {
   };
 
   /**
+   * Agent Runner Dashboard — monitor active runs, queue, and group folders.
+   *
+   * @title Agent Runner
+   * @ui dashboard
+   * @readOnly
+   * @closedWorld
+   */
+  async main(): Promise<{
+    active: Array<{ groupFolder: string; startedAt: string; pid: number | null }>;
+    queued: number;
+    maxConcurrent: number;
+  }> {
+    return this.status();
+  }
+
+  /**
    * Run a prompt against a group's context using Claude.
    * Returns the agent's text response.
    *

@@ -33,6 +33,18 @@ export default class GroupScheduler extends Photon {
   }
 
   /**
+   * Group Scheduler Dashboard — view and manage scheduled tasks.
+   *
+   * @title Group Scheduler
+   * @ui dashboard
+   * @readOnly
+   * @closedWorld
+   */
+  async main(): Promise<ScheduledTask[]> {
+    return Object.values(this.tasks);
+  }
+
+  /**
    * Create a new scheduled task for a group.
    * @param groupFolder Filesystem folder name for the group {@example "dev-team"}
    * @param chatJid WhatsApp JID of the chat {@example "123@g.us"}

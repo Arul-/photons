@@ -100,6 +100,23 @@ export default class Claw extends Photon {
   }
 
   /**
+   * Claw Pipeline Dashboard — monitor pipeline status, registered groups, and agent activity.
+   *
+   * @title Claw
+   * @ui dashboard
+   * @readOnly
+   * @closedWorld
+   */
+  async main(): Promise<{
+    running: boolean;
+    whatsapp: any;
+    runner: any;
+    groups: Array<{ name: string } & GroupConfig>;
+  }> {
+    return this.status();
+  }
+
+  /**
    * Start the pipeline: verify WhatsApp connection, subscribe to registered groups.
    * Streams progress while waiting for WhatsApp to connect.
    *
