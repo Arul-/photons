@@ -14,6 +14,7 @@ import { Photon } from '@portel/photon-core';
  * @icon ⏰
  * @tags scheduler, whatsapp, cron, nanoclaw, groups
  * @stateful
+ * @ui dashboard ./ui/dashboard.html
  */
 export default class GroupScheduler extends Photon {
   private tasks: Record<string, ScheduledTask> = {};
@@ -118,7 +119,7 @@ export default class GroupScheduler extends Photon {
    * List all scheduled tasks, optionally filtered by group folder.
    * @readOnly
    * @param groupFolder Optional filter by group folder
-   * @format table
+   * @ui dashboard
    */
   async tasks(params: { groupFolder?: string } = {}): Promise<ScheduledTask[]> {
     const all = Object.values(this.tasks);
