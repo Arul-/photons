@@ -99,6 +99,7 @@ export default class AgentRouter extends Photon {
    * @title Status
    * @readOnly
    * @closedWorld
+   * @ui dashboard
    */
   async status(): Promise<{
     claude: any;
