@@ -1035,6 +1035,8 @@ export default class WhatsApp extends Photon {
   /**
    * Clear chat history for groups to reclaim storage.
    * Removes messages from your device — does not affect other participants.
+   * Note: WhatsApp's clear API has known reliability issues with groups
+   * (Baileys #1860) — may silently fail on some groups. Use dryRun first.
    *
    * @title Cleanup Chats
    * @destructive
