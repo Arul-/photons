@@ -131,7 +131,6 @@ export default class GroupScheduler extends Photon {
    * List all scheduled tasks, optionally filtered by group folder.
    * @readOnly
    * @param groupFolder Optional filter by group folder
-   * @ui dashboard
    */
   async tasks(params: { groupFolder?: string } = {}): Promise<ScheduledTask[]> {
     const all = Object.values(this.tasks);

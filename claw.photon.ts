@@ -559,7 +559,6 @@ export default class Claw extends Photon {
    * @title Status
    * @readOnly
    * @openWorld
-   * @ui dashboard
    */
   async status(): Promise<{
     running: boolean;

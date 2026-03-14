@@ -100,7 +100,6 @@ export default class AgentRunner extends Photon {
    * @title Status
    * @readOnly
    * @closedWorld
-   * @ui dashboard
    */
   async status(): Promise<{
     active: Array<{ groupFolder: string; startedAt: string; pid: number | null }>;
