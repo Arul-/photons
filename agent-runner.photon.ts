@@ -17,6 +17,7 @@ import { Photon } from '@portel/photon-core';
  * @icon 🤖
  * @tags agent, claude, runner, nanoclaw
  * @stateful
+ * @ui dashboard ./ui/dashboard.html
  */
 export default class AgentRunner extends Photon {
   private activeRuns = new Map<string, RunState>();
@@ -83,7 +84,7 @@ export default class AgentRunner extends Photon {
    * @title Status
    * @readOnly
    * @closedWorld
-   * @format card
+   * @ui dashboard
    */
   async status(): Promise<{
     active: Array<{ groupFolder: string; startedAt: string; pid: number | null }>;
