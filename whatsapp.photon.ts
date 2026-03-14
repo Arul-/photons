@@ -631,6 +631,364 @@ export default class WhatsApp extends Photon {
     });
   }
 
+  // ─── Group Management ──────────────────────────────────────────
+
+  /**
+   * Audit all groups — lists every group with participant count, creation date, and description.
+   * Useful for finding large, dead, or forgotten groups.
+   *
+   * @title Audit Groups
+   * @readOnly
+   * @openWorld
+   * @format table
+   * @param sort Sort by: 'size' (most members), 'name', or 'created' {@choice size, name, created} {@default size}
+   * @param minMembers Only show groups with at least this many members {@min 0} {@default 0}
+   */
+  async audit(params: { sort?: string; minMembers?: number } = {}): Promise<Array<{
+    name: string;
+    jid: string;
+    members: number;
+    admins: number;
+    description: string;
+    created: string;
+    ephemeral: string;
+  }>> {
+    if (!this.connected || !this.sock) throw new Error('Not connected');
+
+    const fetched = await this.sock.groupFetchAllParticipating();
+    const results = Object.entries(fetched).map(([jid, meta]: [string, any]) => {
+      const participants = meta.participants || [];
+      return {
+        name: meta.subject || jid,
+        jid,
+        members: participants.length,
+        admins: participants.filter((p: any) => p.admin === 'admin' || p.admin === 'superadmin').length,
+        description: (meta.desc || '').slice(0, 100),
+        created: meta.creation ? new Date(meta.creation * 1000).toISOString().split('T')[0] : 'unknown',
+        ephemeral: meta.ephemeralDuration ? `${meta.ephemeralDuration / 86400}d` : 'off',
+      };
+    });
+
+    const min = params.minMembers ?? 0;
+    const filtered = results.filter(g => g.members >= min);
+
+    const sort = params.sort || 'size';
+    if (sort === 'size') filtered.sort((a, b) => b.members - a.members);
+    else if (sort === 'name') filtered.sort((a, b) => a.name.localeCompare(b.name));
+    else if (sort === 'created') filtered.sort((a, b) => a.created.localeCompare(b.created));
+
+    return filtered;
+  }
+
+  /**
+   * Leave a WhatsApp group.
+   *
+   * @title Leave Group
+   * @destructive
+   * @openWorld
+   * @param chat Group name or JID {@choice-from groups.name}
+   */
+  async leave(params: { chat: string }): Promise<{ left: string }> {
+    if (!this.connected || !this.sock) throw new Error('Not connected');
+    const jid = await this._resolveJid(params.chat);
+    await this.sock.groupLeave(jid);
+    // Remove from known groups
+    delete this.knownGroups[jid];
+    this._rebuildGroupIndex();
+    return { left: jid };
+  }
+
+  /**
+   * Rename a WhatsApp group.
+   *
+   * @title Rename Group
+   * @openWorld
+   * @param chat Group name or JID {@choice-from groups.name}
+   * @param name New group name {@example "Project Alpha"}
+   */
+  async rename(params: { chat: string; name: string }): Promise<void> {
+    if (!this.connected || !this.sock) throw new Error('Not connected');
+    const jid = await this._resolveJid(params.chat);
+    await this.sock.groupUpdateSubject(jid, params.name);
+    this.knownGroups[jid] = params.name;
+    this._rebuildGroupIndex();
+  }
+
+  /**
+   * Set or clear a group's description.
+   *
+   * @title Set Group Description
+   * @openWorld
+   * @param chat Group name or JID {@choice-from groups.name}
+   * @param description New description (empty to clear)
+   */
+  async describe(params: { chat: string; description: string }): Promise<void> {
+    if (!this.connected || !this.sock) throw new Error('Not connected');
+    const jid = await this._resolveJid(params.chat);
+    await this.sock.groupUpdateDescription(jid, params.description || undefined);
+  }
+
+  /**
+   * Toggle disappearing messages for a group.
+   *
+   * @title Disappearing Messages
+   * @openWorld
+   * @param chat Group name or JID {@choice-from groups.name}
+   * @param duration Duration: 'off', '24h', '7d', '90d' {@choice off, 24h, 7d, 90d} {@default off}
+   */
+  async ephemeral(params: { chat: string; duration: string }): Promise<void> {
+    if (!this.connected || !this.sock) throw new Error('Not connected');
+    const jid = await this._resolveJid(params.chat);
+    const durations: Record<string, number> = {
+      'off': 0,
+      '24h': 86400,
+      '7d': 604800,
+      '90d': 7776000,
+    };
+    const seconds = durations[params.duration] ?? 0;
+    await this.sock.groupToggleEphemeral(jid, seconds);
+  }
+
+  /**
+   * View and manage pending join requests for a group.
+   *
+   * @title Join Requests
+   * @openWorld
+   * @format table
+   * @param chat Group name or JID {@choice-from groups.name}
+   */
+  async requests(params: { chat: string }): Promise<Array<{ jid: string; phone: string }>> {
+    if (!this.connected || !this.sock) throw new Error('Not connected');
+    const jid = await this._resolveJid(params.chat);
+    const pending = await this.sock.groupRequestParticipantsList(jid);
+    return (pending || []).map((p: any) => ({
+      jid: p.jid,
+      phone: '+' + p.jid.split('@')[0],
+    }));
+  }
+
+  /**
+   * Approve or reject pending join requests for a group.
+   *
+   * @title Handle Join Request
+   * @openWorld
+   * @param chat Group name or JID {@choice-from groups.name}
+   * @param members JIDs of requesters to handle
+   * @param action Approve or reject {@choice approve, reject}
+   */
+  async handle(params: { chat: string; members: string[]; action: 'approve' | 'reject' }): Promise<void> {
+    if (!this.connected || !this.sock) throw new Error('Not connected');
+    const jid = await this._resolveJid(params.chat);
+    await this.sock.groupRequestParticipantsUpdate(jid, params.members, params.action);
+  }
+
+  /**
+   * Lock or unlock group settings.
+   * Locked = only admins can edit group info. Announcement = only admins can send messages.
+   *
+   * @title Group Settings
+   * @openWorld
+   * @param chat Group name or JID {@choice-from groups.name}
+   * @param setting Setting to apply {@choice announcement, not_announcement, locked, unlocked}
+   */
+  async restrict(params: { chat: string; setting: string }): Promise<void> {
+    if (!this.connected || !this.sock) throw new Error('Not connected');
+    const jid = await this._resolveJid(params.chat);
+    await this.sock.groupSettingUpdate(jid, params.setting as any);
+  }
+
+  // ─── Chat Organization ────────────────────────────────────────
+
+  /**
+   * Mute or unmute a chat.
+   *
+   * @title Mute Chat
+   * @openWorld
+   * @param chat Group name, phone number, or JID {@choice-from groups.name}
+   * @param duration Mute duration: '8h', '1w', 'forever', or 'off' to unmute {@choice 8h, 1w, forever, off}
+   */
+  async mute(params: { chat: string; duration: string }): Promise<void> {
+    if (!this.connected || !this.sock) throw new Error('Not connected');
+    const jid = await this._resolveJid(params.chat);
+    const durations: Record<string, number | null> = {
+      'off': null,
+      '8h': Date.now() + 8 * 3600 * 1000,
+      '1w': Date.now() + 7 * 86400 * 1000,
+      'forever': -1,
+    };
+    const mute = durations[params.duration] ?? null;
+    await this.sock.chatModify({ mute }, jid);
+  }
+
+  /**
+   * Archive or unarchive a chat.
+   *
+   * @title Archive Chat
+   * @openWorld
+   * @param chat Group name, phone number, or JID {@choice-from groups.name}
+   * @param archive True to archive, false to unarchive {@default true}
+   */
+  async archive(params: { chat: string; archive?: boolean }): Promise<void> {
+    if (!this.connected || !this.sock) throw new Error('Not connected');
+    const jid = await this._resolveJid(params.chat);
+    await this.sock.chatModify({ archive: params.archive !== false }, jid);
+  }
+
+  /**
+   * Pin or unpin a chat.
+   *
+   * @title Pin Chat
+   * @openWorld
+   * @param chat Group name, phone number, or JID {@choice-from groups.name}
+   * @param pin True to pin, false to unpin {@default true}
+   */
+  async pin(params: { chat: string; pin?: boolean }): Promise<void> {
+    if (!this.connected || !this.sock) throw new Error('Not connected');
+    const jid = await this._resolveJid(params.chat);
+    await this.sock.chatModify({ pin: params.pin !== false }, jid);
+  }
+
+  /**
+   * Mark a chat as read or unread.
+   *
+   * @title Mark Read
+   * @openWorld
+   * @param chat Group name, phone number, or JID {@choice-from groups.name}
+   * @param read True to mark read, false to mark unread {@default true}
+   */
+  async read(params: { chat: string; read?: boolean }): Promise<void> {
+    if (!this.connected || !this.sock) throw new Error('Not connected');
+    const jid = await this._resolveJid(params.chat);
+    await this.sock.chatModify({ markRead: params.read !== false }, jid);
+  }
+
+  // ─── Contact Utilities ────────────────────────────────────────
+
+  /**
+   * Check if phone numbers exist on WhatsApp.
+   * Returns which numbers are registered and their JIDs.
+   *
+   * @title Lookup Numbers
+   * @readOnly
+   * @openWorld
+   * @format table
+   * @param numbers Phone numbers to check (with country code) {@example ["+60123456789", "+1234567890"]}
+   */
+  async lookup(params: { numbers: string[] }): Promise<Array<{ number: string; exists: boolean; jid: string | null }>> {
+    if (!this.connected || !this.sock) throw new Error('Not connected');
+    const results = await this.sock.onWhatsApp(...params.numbers.map(n => n.replace(/\D/g, '')));
+    return params.numbers.map(num => {
+      const clean = num.replace(/\D/g, '');
+      const match = results.find((r: any) => r.jid?.startsWith(clean) || clean.endsWith(r.jid?.split('@')[0] || ''));
+      return {
+        number: num,
+        exists: match?.exists ?? false,
+        jid: match?.jid ?? null,
+      };
+    });
+  }
+
+  /**
+   * Block a contact.
+   *
+   * @title Block Contact
+   * @destructive
+   * @openWorld
+   * @param contact Phone number or JID to block {@example "+60123456789"}
+   */
+  async block(params: { contact: string }): Promise<void> {
+    if (!this.connected || !this.sock) throw new Error('Not connected');
+    const jid = await this._resolveJid(params.contact);
+    await this.sock.updateBlockStatus(jid, 'block');
+  }
+
+  /**
+   * Unblock a contact.
+   *
+   * @title Unblock Contact
+   * @openWorld
+   * @param contact Phone number or JID to unblock {@example "+60123456789"}
+   */
+  async unblock(params: { contact: string }): Promise<void> {
+    if (!this.connected || !this.sock) throw new Error('Not connected');
+    const jid = await this._resolveJid(params.contact);
+    await this.sock.updateBlockStatus(jid, 'unblock');
+  }
+
+  /**
+   * List all blocked contacts.
+   *
+   * @title Blocked List
+   * @readOnly
+   * @openWorld
+   * @format table
+   */
+  async blocked(): Promise<Array<{ jid: string; phone: string }>> {
+    if (!this.connected || !this.sock) throw new Error('Not connected');
+    const list = await this.sock.fetchBlocklist();
+    return (list || []).map((jid: string) => ({
+      jid,
+      phone: '+' + jid.split('@')[0],
+    }));
+  }
+
+  // ─── Privacy ──────────────────────────────────────────────────
+
+  /**
+   * View current privacy settings.
+   *
+   * @title Privacy Settings
+   * @readOnly
+   * @openWorld
+   * @format card
+   */
+  async privacy(): Promise<Record<string, string>> {
+    if (!this.connected || !this.sock) throw new Error('Not connected');
+    const settings = await this.sock.fetchPrivacySettings(true);
+    // Flatten to human-readable keys
+    const result: Record<string, string> = {};
+    for (const [key, value] of Object.entries(settings)) {
+      const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      result[label] = String(value);
+    }
+    return result;
+  }
+
+  /**
+   * Update a privacy setting.
+   *
+   * @title Update Privacy
+   * @openWorld
+   * @param setting Which setting to change {@choice lastSeen, online, profilePicture, status, readReceipts, groupsAdd}
+   * @param value New value {@choice all, contacts, none, match_last_seen}
+   */
+  async setPrivacy(params: { setting: string; value: string }): Promise<void> {
+    if (!this.connected || !this.sock) throw new Error('Not connected');
+    const methods: Record<string, (v: any) => Promise<void>> = {
+      lastSeen: (v) => this.sock!.updateLastSeenPrivacy(v),
+      online: (v) => this.sock!.updateOnlinePrivacy(v),
+      profilePicture: (v) => this.sock!.updateProfilePicturePrivacy(v),
+      status: (v) => this.sock!.updateStatusPrivacy(v),
+      readReceipts: (v) => this.sock!.updateReadReceiptsPrivacy(v),
+      groupsAdd: (v) => this.sock!.updateGroupsAddPrivacy(v),
+    };
+    const fn = methods[params.setting];
+    if (!fn) throw new Error(`Unknown setting: ${params.setting}. Valid: ${Object.keys(methods).join(', ')}`);
+    await fn(params.value);
+  }
+
+  /**
+   * Update your profile status message.
+   *
+   * @title Set Status
+   * @openWorld
+   * @param text New status text {@example "Available"}
+   */
+  async setStatus(params: { text: string }): Promise<void> {
+    if (!this.connected || !this.sock) throw new Error('Not connected');
+    await this.sock.updateProfileStatus(params.text);
+  }
+
   // ─── Internal ──────────────────────────────────────────────────
 
   private _rebuildGroupIndex(): void {
