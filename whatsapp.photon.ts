@@ -38,6 +38,7 @@ const LEGACY_MEDIA_DIR = path.join(os.homedir(), '.photon', 'data', 'whatsapp', 
  * @tags whatsapp, messaging, nanoclaw
  * @stateful
  * @dependencies @whiskeysockets/baileys@^7.0.0-rc.9, pino@^9.0.0
+ * @ui dashboard ./ui/dashboard.html
  */
 export default class WhatsApp extends Photon {
   protected settings = {
@@ -434,7 +435,7 @@ export default class WhatsApp extends Photon {
    * @title Status
    * @readOnly
    * @closedWorld
-   * @format card
+   * @ui dashboard
    */
   async status(): Promise<{
     status: 'connected' | 'disconnected' | 'qr_pending';

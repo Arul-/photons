@@ -1,0 +1,1075 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="mcp:ui-size" content="minWidth=800;minHeight=500;maxHeight=900">
+  <title>WhatsApp Dashboard</title>
+  <style>
+    :root {
+      --bg-primary: #0d0d0d;
+      --bg-secondary: #1a1a1a;
+      --bg-tertiary: #262626;
+      --bg-card: #1e1e1e;
+      --text-primary: #e6e6e6;
+      --text-secondary: #a0a0a0;
+      --text-muted: #666;
+      --border-color: #333;
+      --accent: #25D366;
+      --accent-hover: #1ebe57;
+      --accent-dim: rgba(37, 211, 102, 0.15);
+      --danger: #ef4444;
+      --danger-dim: rgba(239, 68, 68, 0.15);
+      --warning: #f59e0b;
+      --warning-dim: rgba(245, 158, 11, 0.15);
+      --blue: #3b82f6;
+      --blue-dim: rgba(59, 130, 246, 0.15);
+    }
+
+    :root.light {
+      --bg-primary: #f4f4f5;
+      --bg-secondary: #fafafa;
+      --bg-tertiary: #e4e4e7;
+      --bg-card: #ffffff;
+      --text-primary: #18181b;
+      --text-secondary: #52525b;
+      --text-muted: #a1a1aa;
+      --border-color: #d4d4d8;
+      --accent: #1da851;
+      --accent-hover: #178a42;
+      --accent-dim: rgba(29, 168, 81, 0.1);
+      --danger-dim: rgba(239, 68, 68, 0.1);
+      --warning-dim: rgba(245, 158, 11, 0.1);
+      --blue-dim: rgba(59, 130, 246, 0.1);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { margin: 0; padding: 0; overflow: hidden; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-color);
+      background: var(--bg-secondary);
+      flex-shrink: 0;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .header h1 {
+      font-size: 18px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .status-badge.connected {
+      background: var(--accent-dim);
+      color: var(--accent);
+    }
+
+    .status-badge.disconnected {
+      background: var(--danger-dim);
+      color: var(--danger);
+    }
+
+    .status-badge.qr_pending {
+      background: var(--warning-dim);
+      color: var(--warning);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .status-badge.connected .status-dot {
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      border: 1px solid var(--border-color);
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .btn:hover { background: var(--border-color); }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-hover);
+      border-color: var(--accent-hover);
+    }
+
+    .btn-danger {
+      background: var(--danger-dim);
+      color: var(--danger);
+      border-color: transparent;
+    }
+
+    .btn-danger:hover {
+      background: var(--danger);
+      color: #fff;
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* ── Main Layout ── */
+    .main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Sidebar (Groups) ── */
+    .sidebar {
+      width: 280px;
+      border-right: 1px solid var(--border-color);
+      background: var(--bg-secondary);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+
+    .sidebar-header {
+      padding: 12px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .sidebar-header h2 {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+    }
+
+    .group-count {
+      font-size: 11px;
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+      padding: 2px 8px;
+      border-radius: 10px;
+    }
+
+    .sidebar-search {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .sidebar-search input {
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--border-color);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-size: 13px;
+      outline: none;
+    }
+
+    .sidebar-search input:focus {
+      border-color: var(--accent);
+    }
+
+    .sidebar-search input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .group-list {
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    .group-item {
+      padding: 10px 12px;
+      cursor: pointer;
+      border-bottom: 1px solid var(--border-color);
+      transition: background 0.1s;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .group-item:hover { background: var(--bg-tertiary); }
+
+    .group-item.selected {
+      background: var(--accent-dim);
+      border-left: 3px solid var(--accent);
+    }
+
+    .group-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: var(--bg-tertiary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .group-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .group-name {
+      font-size: 14px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .group-jid {
+      font-size: 11px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* ── Content Area ── */
+    .content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Info Panel (when a group is selected) ── */
+    .info-panel {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+
+    .info-panel-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .info-panel-header h2 {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .info-panel-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    /* ── Compose Area ── */
+    .compose-area {
+      padding: 16px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .compose-form {
+      display: flex;
+      gap: 8px;
+    }
+
+    .compose-form textarea {
+      flex: 1;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-size: 14px;
+      font-family: inherit;
+      resize: none;
+      outline: none;
+      min-height: 42px;
+      max-height: 120px;
+    }
+
+    .compose-form textarea:focus {
+      border-color: var(--accent);
+    }
+
+    .compose-form textarea::placeholder {
+      color: var(--text-muted);
+    }
+
+    /* ── Members List ── */
+    .members-section {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+    }
+
+    .members-section h3 {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    .member-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .member-item:last-child { border-bottom: none; }
+
+    .member-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--bg-tertiary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .member-jid {
+      font-size: 13px;
+      flex: 1;
+    }
+
+    .member-role {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-weight: 500;
+    }
+
+    .member-role.admin {
+      background: var(--accent-dim);
+      color: var(--accent);
+    }
+
+    .member-role.superadmin {
+      background: var(--blue-dim);
+      color: var(--blue);
+    }
+
+    .member-role.member {
+      background: var(--bg-tertiary);
+      color: var(--text-muted);
+    }
+
+    /* ── Empty / QR States ── */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      gap: 16px;
+      color: var(--text-muted);
+    }
+
+    .empty-state .icon {
+      font-size: 48px;
+      opacity: 0.5;
+    }
+
+    .empty-state p {
+      font-size: 14px;
+      text-align: center;
+      max-width: 300px;
+      line-height: 1.5;
+    }
+
+    .qr-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      gap: 20px;
+    }
+
+    .qr-container h2 {
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .qr-container p {
+      font-size: 14px;
+      color: var(--text-secondary);
+      text-align: center;
+      max-width: 360px;
+      line-height: 1.5;
+    }
+
+    .qr-code {
+      padding: 16px;
+      background: #fff;
+      border-radius: 12px;
+    }
+
+    .qr-code canvas {
+      display: block;
+    }
+
+    /* ── Stats Bar ── */
+    .stats-bar {
+      display: flex;
+      gap: 16px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-color);
+      background: var(--bg-secondary);
+    }
+
+    .stat-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .stat-item .value {
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    /* ── Loading ── */
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 20px;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    .spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--border-color);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed;
+      bottom: 16px;
+      right: 16px;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      transform: translateY(100px);
+      opacity: 0;
+      transition: all 0.3s ease;
+      z-index: 100;
+    }
+
+    .toast.visible {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    .toast.success { border-color: var(--accent); }
+    .toast.error { border-color: var(--danger); }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb {
+      background: var(--border-color);
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <h1>WhatsApp</h1>
+      <div class="status-badge disconnected" id="statusBadge">
+        <span class="status-dot"></span>
+        <span id="statusText">Disconnected</span>
+      </div>
+      <span id="phoneNumber" style="font-size: 13px; color: var(--text-secondary);"></span>
+    </div>
+    <div class="header-actions">
+      <button class="btn" id="refreshBtn" title="Refresh groups">Refresh</button>
+      <button class="btn btn-primary" id="connectBtn">Connect</button>
+    </div>
+  </div>
+
+  <!-- Stats Bar -->
+  <div class="stats-bar" id="statsBar" style="display: none;">
+    <div class="stat-item">Groups <span class="value" id="groupCountStat">0</span></div>
+    <div class="stat-item">Queued <span class="value" id="queuedStat">0</span></div>
+    <div class="stat-item">Reconnects <span class="value" id="reconnectStat">0</span></div>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+    <!-- Sidebar -->
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <h2>Groups</h2>
+        <span class="group-count" id="groupCount">0</span>
+      </div>
+      <div class="sidebar-search">
+        <input type="text" id="groupSearch" placeholder="Search groups...">
+      </div>
+      <div class="group-list" id="groupList">
+        <div class="empty-state" style="padding: 40px 16px;">
+          <span class="icon">💬</span>
+          <p>Connect to WhatsApp to see your groups</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Content -->
+    <div class="content" id="contentArea">
+      <div class="empty-state" id="emptyState">
+        <span class="icon">💬</span>
+        <p>Select a group from the sidebar to view details and send messages</p>
+      </div>
+
+      <!-- QR Code State -->
+      <div class="qr-container" id="qrState" style="display: none;">
+        <h2>Scan QR Code</h2>
+        <p>Open WhatsApp on your phone, go to Linked Devices, and scan this code to connect.</p>
+        <div class="qr-code" id="qrCode"></div>
+        <p style="font-size: 12px; color: var(--text-muted);">QR code refreshes automatically. Call status() after scanning.</p>
+      </div>
+
+      <!-- Group Detail Panel -->
+      <div class="info-panel" id="groupPanel" style="display: none;">
+        <div class="info-panel-header">
+          <h2 id="panelGroupName">Group Name</h2>
+          <div class="info-panel-actions">
+            <button class="btn" id="inviteBtn">Invite Link</button>
+            <button class="btn" id="membersBtn">Members</button>
+          </div>
+        </div>
+
+        <!-- Compose -->
+        <div class="compose-area">
+          <div class="compose-form">
+            <textarea id="messageInput" placeholder="Type a message..." rows="1"></textarea>
+            <button class="btn btn-primary" id="sendBtn">Send</button>
+          </div>
+        </div>
+
+        <!-- Members -->
+        <div class="members-section" id="membersSection" style="display: none;">
+          <h3>Members</h3>
+          <div id="membersList"></div>
+        </div>
+
+        <!-- Invite Link Result -->
+        <div id="inviteResult" style="display: none; padding: 16px;">
+          <div style="background: var(--bg-tertiary); padding: 12px; border-radius: 8px; font-size: 13px; word-break: break-all;">
+            <span id="inviteLinkText"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <!-- QR Code library (lightweight, no deps) -->
+  <script>
+    // Minimal QR code renderer — generates SVG from QR string data
+    // Uses the text-to-qr pattern since Baileys returns the QR as a string
+    function renderQR(text, container) {
+      // Create a simple table-based QR display using the qr data
+      // The QR data from Baileys is a string that encodes the pairing info
+      container.innerHTML = '<div style="font-size: 12px; color: var(--text-muted); padding: 20px; text-align: center;">' +
+        '<div style="font-family: monospace; word-break: break-all; background: #fff; color: #000; padding: 16px; border-radius: 8px; font-size: 11px; max-width: 300px; margin: 0 auto;">' +
+        text + '</div>' +
+        '<p style="margin-top: 12px;">Copy this code and use WhatsApp Web QR scanner</p></div>';
+    }
+  </script>
+
+  <script>
+    // ── State ──
+    let state = {
+      status: 'disconnected',
+      phone: '',
+      queuedMessages: 0,
+      reconnectAttempts: 0,
+      groups: [],
+      selectedGroup: null,
+      members: [],
+    };
+
+    // ── DOM refs ──
+    const $ = id => document.getElementById(id);
+
+    // ── MCP Result Parser ──
+    function parseMCP(raw) {
+      if (raw && raw.content && Array.isArray(raw.content)) {
+        const item = raw.content.find(c => c.type === 'text' && c.text);
+        if (item) {
+          try { return JSON.parse(item.text); } catch(e) { return item.text; }
+        }
+      }
+      return raw;
+    }
+
+    // ── Toast ──
+    let toastTimer;
+    function toast(msg, type = 'info') {
+      const el = $('toast');
+      el.textContent = msg;
+      el.className = 'toast visible ' + type;
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => el.className = 'toast', 3000);
+    }
+
+    // ── Render Functions ──
+
+    function renderStatus() {
+      const badge = $('statusBadge');
+      const text = $('statusText');
+      const phone = $('phoneNumber');
+      const connectBtn = $('connectBtn');
+      const statsBar = $('statsBar');
+
+      badge.className = 'status-badge ' + state.status;
+
+      const labels = {
+        connected: 'Connected',
+        disconnected: 'Disconnected',
+        qr_pending: 'QR Pending',
+      };
+      text.textContent = labels[state.status] || state.status;
+
+      phone.textContent = state.phone ? '+' + state.phone : '';
+
+      if (state.status === 'connected') {
+        connectBtn.textContent = 'Disconnect';
+        connectBtn.className = 'btn btn-danger';
+        statsBar.style.display = 'flex';
+      } else {
+        connectBtn.textContent = 'Connect';
+        connectBtn.className = 'btn btn-primary';
+        statsBar.style.display = state.queuedMessages > 0 ? 'flex' : 'none';
+      }
+
+      $('groupCountStat').textContent = state.groups.length;
+      $('queuedStat').textContent = state.queuedMessages;
+      $('reconnectStat').textContent = state.reconnectAttempts;
+    }
+
+    function renderGroups() {
+      const list = $('groupList');
+      const search = $('groupSearch').value.toLowerCase();
+      const filtered = state.groups.filter(g =>
+        g.name.toLowerCase().includes(search) || g.jid.includes(search)
+      );
+
+      $('groupCount').textContent = state.groups.length;
+
+      if (filtered.length === 0) {
+        list.innerHTML = '<div class="empty-state" style="padding: 40px 16px;">' +
+          '<span class="icon">' + (state.groups.length === 0 ? '💬' : '🔍') + '</span>' +
+          '<p>' + (state.groups.length === 0 ? 'Connect to WhatsApp to see your groups' : 'No groups match your search') + '</p></div>';
+        return;
+      }
+
+      list.innerHTML = filtered.map(g => {
+        const initial = g.name.charAt(0).toUpperCase();
+        const selected = state.selectedGroup && state.selectedGroup.jid === g.jid ? ' selected' : '';
+        return '<div class="group-item' + selected + '" data-jid="' + g.jid + '">' +
+          '<div class="group-avatar">' + initial + '</div>' +
+          '<div class="group-info">' +
+          '<div class="group-name">' + escapeHtml(g.name) + '</div>' +
+          '<div class="group-jid">' + g.jid.split('@')[0] + '</div>' +
+          '</div></div>';
+      }).join('');
+
+      // Click handlers
+      list.querySelectorAll('.group-item').forEach(el => {
+        el.addEventListener('click', () => selectGroup(el.dataset.jid));
+      });
+    }
+
+    function renderGroupPanel() {
+      const panel = $('groupPanel');
+      const empty = $('emptyState');
+      const qr = $('qrState');
+
+      if (!state.selectedGroup) {
+        panel.style.display = 'none';
+        qr.style.display = 'none';
+        empty.style.display = 'flex';
+        return;
+      }
+
+      empty.style.display = 'none';
+      qr.style.display = 'none';
+      panel.style.display = 'flex';
+
+      $('panelGroupName').textContent = state.selectedGroup.name;
+      $('membersSection').style.display = 'none';
+      $('inviteResult').style.display = 'none';
+    }
+
+    function renderMembers() {
+      const list = $('membersList');
+      if (state.members.length === 0) {
+        list.innerHTML = '<div class="loading"><span class="spinner"></span> Loading members...</div>';
+        return;
+      }
+
+      list.innerHTML = state.members.map(m => {
+        const phone = m.jid.split('@')[0];
+        const roleClass = m.admin === 'superadmin' ? 'superadmin' : m.admin === 'admin' ? 'admin' : 'member';
+        const roleLabel = m.admin === 'superadmin' ? 'Owner' : m.admin === 'admin' ? 'Admin' : 'Member';
+        return '<div class="member-item">' +
+          '<div class="member-avatar">' + phone.slice(-2) + '</div>' +
+          '<div class="member-jid">+' + phone + '</div>' +
+          '<span class="member-role ' + roleClass + '">' + roleLabel + '</span>' +
+          '</div>';
+      }).join('');
+    }
+
+    function showQR(qrData) {
+      $('emptyState').style.display = 'none';
+      $('groupPanel').style.display = 'none';
+      $('qrState').style.display = 'flex';
+      renderQR(qrData, $('qrCode'));
+    }
+
+    // ── Actions ──
+
+    async function refreshStatus() {
+      try {
+        const raw = await window.photon.callTool('status', {});
+        const data = parseMCP(raw);
+        if (data && typeof data === 'object') {
+          state.status = data.status || 'disconnected';
+          state.phone = data.phone || '';
+          state.queuedMessages = data.queuedMessages || 0;
+          state.reconnectAttempts = data.reconnectAttempts || 0;
+          if (data.qr) showQR(data.qr);
+          renderStatus();
+        }
+      } catch (e) {
+        console.error('Status fetch failed:', e);
+      }
+    }
+
+    async function loadGroups() {
+      try {
+        const raw = await window.photon.callTool('groups', {});
+        const data = parseMCP(raw);
+        if (Array.isArray(data)) {
+          state.groups = data.sort((a, b) => a.name.localeCompare(b.name));
+          renderGroups();
+          renderStatus();
+        }
+      } catch (e) {
+        toast('Failed to load groups: ' + (e.message || e), 'error');
+      }
+    }
+
+    async function selectGroup(jid) {
+      const group = state.groups.find(g => g.jid === jid);
+      if (!group) return;
+      state.selectedGroup = group;
+      state.members = [];
+      renderGroups();
+      renderGroupPanel();
+      // Load members
+      loadMembers(group);
+    }
+
+    async function loadMembers(group) {
+      $('membersSection').style.display = 'block';
+      $('membersList').innerHTML = '<div class="loading"><span class="spinner"></span> Loading members...</div>';
+      try {
+        const raw = await window.photon.callTool('members', { chat: group.jid });
+        const data = parseMCP(raw);
+        if (Array.isArray(data)) {
+          state.members = data;
+          renderMembers();
+        }
+      } catch (e) {
+        $('membersList').innerHTML = '<p style="color: var(--text-muted); font-size: 13px; padding: 8px 0;">Failed to load members</p>';
+      }
+    }
+
+    async function connectWhatsApp() {
+      if (state.status === 'connected') {
+        // Disconnect
+        try {
+          await window.photon.callTool('disconnect', {});
+          state.status = 'disconnected';
+          state.phone = '';
+          state.groups = [];
+          state.selectedGroup = null;
+          renderStatus();
+          renderGroups();
+          renderGroupPanel();
+          toast('Disconnected from WhatsApp', 'success');
+        } catch (e) {
+          toast('Disconnect failed: ' + (e.message || e), 'error');
+        }
+        return;
+      }
+
+      $('connectBtn').disabled = true;
+      $('connectBtn').textContent = 'Connecting...';
+      try {
+        const raw = await window.photon.callTool('connect', {});
+        const data = parseMCP(raw);
+        if (data.status === 'qr_pending' && data.qr) {
+          showQR(data.qr);
+          state.status = 'qr_pending';
+          renderStatus();
+          toast('Scan QR code with WhatsApp', 'info');
+          // Poll for connection
+          pollConnection();
+        } else if (data.status === 'connected' || data.status === 'already_connected') {
+          state.status = 'connected';
+          state.phone = data.phone || '';
+          renderStatus();
+          $('qrState').style.display = 'none';
+          $('emptyState').style.display = 'flex';
+          toast('Connected to WhatsApp!', 'success');
+          loadGroups();
+        }
+      } catch (e) {
+        toast('Connection failed: ' + (e.message || e), 'error');
+      } finally {
+        $('connectBtn').disabled = false;
+        renderStatus();
+      }
+    }
+
+    let pollTimer;
+    function pollConnection() {
+      clearInterval(pollTimer);
+      pollTimer = setInterval(async () => {
+        await refreshStatus();
+        if (state.status === 'connected') {
+          clearInterval(pollTimer);
+          $('qrState').style.display = 'none';
+          $('emptyState').style.display = 'flex';
+          toast('Connected to WhatsApp!', 'success');
+          loadGroups();
+        }
+      }, 3000);
+    }
+
+    async function sendMessage() {
+      if (!state.selectedGroup) return;
+      const input = $('messageInput');
+      const text = input.value.trim();
+      if (!text) return;
+
+      $('sendBtn').disabled = true;
+      try {
+        const raw = await window.photon.callTool('send', {
+          chat: state.selectedGroup.jid,
+          text: text,
+        });
+        const data = parseMCP(raw);
+        input.value = '';
+        input.style.height = 'auto';
+        if (data && data.queued) {
+          toast('Message queued (offline)', 'info');
+        } else {
+          toast('Message sent to ' + state.selectedGroup.name, 'success');
+        }
+      } catch (e) {
+        toast('Send failed: ' + (e.message || e), 'error');
+      } finally {
+        $('sendBtn').disabled = false;
+      }
+    }
+
+    async function getInviteLink() {
+      if (!state.selectedGroup) return;
+      $('inviteBtn').disabled = true;
+      try {
+        const raw = await window.photon.callTool('invite', { chat: state.selectedGroup.jid });
+        const data = parseMCP(raw);
+        if (data && data.link) {
+          $('inviteLinkText').textContent = data.link;
+          $('inviteResult').style.display = 'block';
+          toast('Invite link generated', 'success');
+        }
+      } catch (e) {
+        toast('Failed to get invite link: ' + (e.message || e), 'error');
+      } finally {
+        $('inviteBtn').disabled = false;
+      }
+    }
+
+    // ── Helpers ──
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    // ── Auto-resize textarea ──
+    $('messageInput').addEventListener('input', function() {
+      this.style.height = 'auto';
+      this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+    });
+
+    // ── Enter to send ──
+    $('messageInput').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    // ── Event Listeners ──
+    $('connectBtn').addEventListener('click', connectWhatsApp);
+    $('refreshBtn').addEventListener('click', () => {
+      refreshStatus();
+      if (state.status === 'connected') loadGroups();
+    });
+    $('sendBtn').addEventListener('click', sendMessage);
+    $('inviteBtn').addEventListener('click', getInviteLink);
+    $('membersBtn').addEventListener('click', () => {
+      const sec = $('membersSection');
+      if (sec.style.display === 'none') {
+        sec.style.display = 'block';
+        if (state.selectedGroup && state.members.length === 0) {
+          loadMembers(state.selectedGroup);
+        }
+      } else {
+        sec.style.display = 'none';
+      }
+    });
+    $('groupSearch').addEventListener('input', renderGroups);
+
+    // ── Theme ──
+    if (window.photon) {
+      if (window.photon.theme === 'light') {
+        document.documentElement.classList.add('light');
+      }
+      window.photon.onThemeChange(theme => {
+        document.documentElement.classList.toggle('light', theme === 'light');
+      });
+    }
+
+    // ── onResult: handle status() results pushed by host ──
+    if (window.photon) {
+      window.photon.onResult((result) => {
+        const data = parseMCP(result);
+        if (!data || typeof data !== 'object') return;
+
+        // Status result
+        if ('status' in data && ('phone' in data || 'queuedMessages' in data)) {
+          state.status = data.status || state.status;
+          state.phone = data.phone || state.phone;
+          state.queuedMessages = data.queuedMessages || 0;
+          state.reconnectAttempts = data.reconnectAttempts || 0;
+          renderStatus();
+          if (data.qr) showQR(data.qr);
+        }
+        // Groups result
+        else if (Array.isArray(data) && data.length > 0 && data[0].jid && data[0].name) {
+          state.groups = data.sort((a, b) => a.name.localeCompare(b.name));
+          renderGroups();
+          renderStatus();
+        }
+      });
+
+      // Initial load
+      refreshStatus().then(() => {
+        if (state.status === 'connected') loadGroups();
+      });
+    }
+  </script>
+</body>
+</html>
