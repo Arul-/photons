@@ -16,6 +16,7 @@ import { Photon } from '@portel/photon-core';
  * @photon gemini ./gemini-runner.photon.ts
  * @photon aider ./aider-runner.photon.ts
  * @photon opencode ./opencode-runner.photon.ts
+ * @ui dashboard ./ui/dashboard.html
  */
 export default class AgentRouter extends Photon {
   constructor(
@@ -79,7 +80,7 @@ export default class AgentRouter extends Photon {
    * @title Status
    * @readOnly
    * @closedWorld
-   * @format card
+   * @ui dashboard
    */
   async status(): Promise<{
     claude: any;
