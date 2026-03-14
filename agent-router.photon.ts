@@ -36,21 +36,10 @@ export default class AgentRouter extends Photon {
   };
 
   /**
-   * Agent Router Dashboard — view all agent statuses and routing config.
-   *
-   * @title Agent Router
+   * Agent Router Dashboard
    * @ui dashboard
-   * @readOnly
-   * @closedWorld
    */
-  async main(): Promise<{
-    claude: any;
-    gemini: any;
-    aider: any;
-    opencode: any;
-    totalActive: number;
-    totalQueued: number;
-  }> {
+  async main() {
     return this.status();
   }
 

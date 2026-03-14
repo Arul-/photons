@@ -33,14 +33,10 @@ export default class GroupScheduler extends Photon {
   }
 
   /**
-   * Group Scheduler Dashboard — view and manage scheduled tasks.
-   *
-   * @title Group Scheduler
+   * Group Scheduler Dashboard
    * @ui dashboard
-   * @readOnly
-   * @closedWorld
    */
-  async main(): Promise<ScheduledTask[]> {
+  async main() {
     return Object.values(this.tasks);
   }
 

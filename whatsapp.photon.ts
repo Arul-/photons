@@ -172,29 +172,11 @@ export default class WhatsApp extends Photon {
   }
 
   /**
-   * WhatsApp Dashboard — connection management, messaging, group audit, and utilities.
-   *
-   * @title WhatsApp
+   * WhatsApp Dashboard
    * @ui dashboard
-   * @readOnly
-   * @closedWorld
    */
-  async main(): Promise<{
-    status: 'connected' | 'disconnected' | 'qr_pending';
-    phone: string;
-    queuedMessages: number;
-    reconnectAttempts: number;
-    groupCount: number;
-    qr?: string;
-  }> {
-    return {
-      status: this.connected ? 'connected' : this.qrPending ? 'qr_pending' : 'disconnected',
-      phone: this.phoneNumber,
-      queuedMessages: this.outgoingQueue.length,
-      reconnectAttempts: this.reconnectAttempts,
-      groupCount: Object.keys(this.knownGroups).length,
-      ...(this._lastQR ? { qr: this._lastQR } : {}),
-    };
+  async main() {
+    return this.status();
   }
 
   /**
