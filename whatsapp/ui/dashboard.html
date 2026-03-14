@@ -24,6 +24,8 @@
       --warning-dim: rgba(245, 158, 11, 0.15);
       --blue: #3b82f6;
       --blue-dim: rgba(59, 130, 246, 0.15);
+      --purple: #8b5cf6;
+      --purple-dim: rgba(139, 92, 246, 0.15);
     }
 
     :root.light {
@@ -41,6 +43,7 @@
       --danger-dim: rgba(239, 68, 68, 0.1);
       --warning-dim: rgba(245, 158, 11, 0.1);
       --blue-dim: rgba(59, 130, 246, 0.1);
+      --purple-dim: rgba(139, 92, 246, 0.1);
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -72,13 +75,7 @@
       gap: 12px;
     }
 
-    .header h1 {
-      font-size: 18px;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
+    .header h1 { font-size: 18px; font-weight: 600; }
 
     .status-badge {
       display: inline-flex;
@@ -90,41 +87,21 @@
       font-weight: 500;
     }
 
-    .status-badge.connected {
-      background: var(--accent-dim);
-      color: var(--accent);
-    }
-
-    .status-badge.disconnected {
-      background: var(--danger-dim);
-      color: var(--danger);
-    }
-
-    .status-badge.qr_pending {
-      background: var(--warning-dim);
-      color: var(--warning);
-    }
+    .status-badge.connected { background: var(--accent-dim); color: var(--accent); }
+    .status-badge.disconnected { background: var(--danger-dim); color: var(--danger); }
+    .status-badge.qr_pending { background: var(--warning-dim); color: var(--warning); }
 
     .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: currentColor;
+      width: 8px; height: 8px; border-radius: 50%; background: currentColor;
     }
 
     .status-badge.connected .status-dot {
       animation: pulse 2s ease-in-out infinite;
     }
 
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
-    }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
-    .header-actions {
-      display: flex;
-      gap: 8px;
-    }
+    .header-actions { display: flex; gap: 8px; }
 
     .btn {
       display: inline-flex;
@@ -142,33 +119,58 @@
     }
 
     .btn:hover { background: var(--border-color); }
+    .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+    .btn-danger { background: var(--danger-dim); color: var(--danger); border-color: transparent; }
+    .btn-danger:hover { background: var(--danger); color: #fff; }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-    .btn-primary {
-      background: var(--accent);
-      color: #fff;
-      border-color: var(--accent);
+    /* ── Tab Bar ── */
+    .tab-bar {
+      display: flex;
+      gap: 0;
+      border-bottom: 1px solid var(--border-color);
+      background: var(--bg-secondary);
+      flex-shrink: 0;
     }
 
-    .btn-primary:hover {
-      background: var(--accent-hover);
-      border-color: var(--accent-hover);
+    .tab {
+      padding: 10px 20px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s;
+      background: none;
+      border-top: none;
+      border-left: none;
+      border-right: none;
     }
 
-    .btn-danger {
-      background: var(--danger-dim);
-      color: var(--danger);
-      border-color: transparent;
+    .tab:hover { color: var(--text-secondary); }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    /* ── Stats Bar ── */
+    .stats-bar {
+      display: flex;
+      gap: 16px;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border-color);
+      background: var(--bg-secondary);
+      font-size: 13px;
+      flex-shrink: 0;
     }
 
-    .btn-danger:hover {
-      background: var(--danger);
-      color: #fff;
+    .stat-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-secondary);
     }
 
-    .btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
+    .stat-item .value { font-weight: 600; color: var(--text-primary); }
 
     /* ── Main Layout ── */
     .main {
@@ -211,10 +213,7 @@
       border-radius: 10px;
     }
 
-    .sidebar-search {
-      padding: 8px 12px;
-      border-bottom: 1px solid var(--border-color);
-    }
+    .sidebar-search { padding: 8px 12px; border-bottom: 1px solid var(--border-color); }
 
     .sidebar-search input {
       width: 100%;
@@ -227,18 +226,10 @@
       outline: none;
     }
 
-    .sidebar-search input:focus {
-      border-color: var(--accent);
-    }
+    .sidebar-search input:focus { border-color: var(--accent); }
+    .sidebar-search input::placeholder { color: var(--text-muted); }
 
-    .sidebar-search input::placeholder {
-      color: var(--text-muted);
-    }
-
-    .group-list {
-      flex: 1;
-      overflow-y: auto;
-    }
+    .group-list { flex: 1; overflow-y: auto; }
 
     .group-item {
       padding: 10px 12px;
@@ -251,45 +242,26 @@
     }
 
     .group-item:hover { background: var(--bg-tertiary); }
-
-    .group-item.selected {
-      background: var(--accent-dim);
-      border-left: 3px solid var(--accent);
-    }
+    .group-item.selected { background: var(--accent-dim); border-left: 3px solid var(--accent); }
 
     .group-avatar {
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
+      width: 36px; height: 36px; border-radius: 50%;
       background: var(--bg-tertiary);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 16px;
-      flex-shrink: 0;
-      color: var(--text-muted);
-      font-weight: 600;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; flex-shrink: 0;
+      color: var(--text-muted); font-weight: 600;
     }
 
-    .group-info {
-      flex: 1;
-      min-width: 0;
-    }
+    .group-info { flex: 1; min-width: 0; }
 
     .group-name {
-      font-size: 14px;
-      font-weight: 500;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      font-size: 14px; font-weight: 500;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
 
     .group-jid {
-      font-size: 11px;
-      color: var(--text-muted);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      font-size: 11px; color: var(--text-muted);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
 
     /* ── Content Area ── */
@@ -300,11 +272,14 @@
       overflow: hidden;
     }
 
-    /* ── Info Panel (when a group is selected) ── */
+    .tab-content { display: none; flex: 1; overflow: hidden; }
+    .tab-content.active { display: flex; flex-direction: column; }
+
+    /* ── Chat Tab ── */
+    .chat-view { display: flex; flex: 1; overflow: hidden; }
+
     .info-panel {
-      display: flex;
-      flex-direction: column;
-      height: 100%;
+      display: flex; flex-direction: column; height: 100%; flex: 1;
     }
 
     .info-panel-header {
@@ -315,26 +290,24 @@
       justify-content: space-between;
     }
 
-    .info-panel-header h2 {
-      font-size: 18px;
-      font-weight: 600;
-    }
+    .info-panel-header h2 { font-size: 18px; font-weight: 600; }
+    .info-panel-actions { display: flex; gap: 8px; }
 
-    .info-panel-actions {
+    /* Quick actions bar */
+    .quick-actions {
       display: flex;
-      gap: 8px;
-    }
-
-    /* ── Compose Area ── */
-    .compose-area {
-      padding: 16px;
+      gap: 6px;
+      padding: 10px 16px;
       border-bottom: 1px solid var(--border-color);
+      background: var(--bg-secondary);
+      flex-wrap: wrap;
     }
 
-    .compose-form {
-      display: flex;
-      gap: 8px;
-    }
+    .quick-actions .btn { font-size: 11px; padding: 4px 10px; }
+
+    .compose-area { padding: 16px; border-bottom: 1px solid var(--border-color); }
+
+    .compose-form { display: flex; gap: 8px; }
 
     .compose-form textarea {
       flex: 1;
@@ -351,214 +324,207 @@
       max-height: 120px;
     }
 
-    .compose-form textarea:focus {
-      border-color: var(--accent);
-    }
+    .compose-form textarea:focus { border-color: var(--accent); }
+    .compose-form textarea::placeholder { color: var(--text-muted); }
 
-    .compose-form textarea::placeholder {
-      color: var(--text-muted);
-    }
-
-    /* ── Members List ── */
-    .members-section {
-      flex: 1;
-      overflow-y: auto;
-      padding: 16px;
-    }
+    .members-section { flex: 1; overflow-y: auto; padding: 16px; }
 
     .members-section h3 {
-      font-size: 13px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: var(--text-muted);
-      margin-bottom: 12px;
+      font-size: 13px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 12px;
     }
 
     .member-item {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 8px 0;
-      border-bottom: 1px solid var(--border-color);
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 0; border-bottom: 1px solid var(--border-color);
     }
 
     .member-item:last-child { border-bottom: none; }
 
     .member-avatar {
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
+      width: 32px; height: 32px; border-radius: 50%;
       background: var(--bg-tertiary);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 13px;
-      color: var(--text-muted);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; color: var(--text-muted);
     }
 
-    .member-jid {
-      font-size: 13px;
-      flex: 1;
-    }
+    .member-jid { font-size: 13px; flex: 1; }
 
     .member-role {
-      font-size: 11px;
-      padding: 2px 8px;
-      border-radius: 10px;
-      font-weight: 500;
+      font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500;
     }
 
-    .member-role.admin {
-      background: var(--accent-dim);
-      color: var(--accent);
+    .member-role.admin { background: var(--accent-dim); color: var(--accent); }
+    .member-role.superadmin { background: var(--blue-dim); color: var(--blue); }
+    .member-role.member { background: var(--bg-tertiary); color: var(--text-muted); }
+
+    /* ── Audit Tab ── */
+    .audit-view { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+
+    .audit-toolbar {
+      display: flex; gap: 8px; padding: 12px 16px; align-items: center;
+      border-bottom: 1px solid var(--border-color); background: var(--bg-secondary);
     }
 
-    .member-role.superadmin {
-      background: var(--blue-dim);
-      color: var(--blue);
+    .audit-toolbar select {
+      padding: 6px 10px; border-radius: 6px; font-size: 13px;
+      border: 1px solid var(--border-color);
+      background: var(--bg-primary); color: var(--text-primary);
+      outline: none;
     }
 
-    .member-role.member {
+    .audit-toolbar label { font-size: 13px; color: var(--text-secondary); }
+
+    .audit-summary {
+      display: flex; gap: 16px; padding: 10px 16px;
+      border-bottom: 1px solid var(--border-color); font-size: 13px;
+    }
+
+    .audit-table-wrap { flex: 1; overflow: auto; padding: 0; }
+
+    .audit-table {
+      width: 100%; border-collapse: collapse; font-size: 13px;
+    }
+
+    .audit-table th {
+      text-align: left; padding: 10px 12px;
+      background: var(--bg-secondary); color: var(--text-muted);
+      font-weight: 600; font-size: 11px; text-transform: uppercase;
+      letter-spacing: 0.5px; position: sticky; top: 0;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .audit-table td {
+      padding: 8px 12px; border-bottom: 1px solid var(--border-color);
+    }
+
+    .audit-table tr:hover { background: var(--bg-tertiary); }
+
+    .audit-table .actions { display: flex; gap: 4px; }
+
+    .size-badge {
+      display: inline-block; padding: 2px 8px; border-radius: 10px;
+      font-size: 11px; font-weight: 500;
+    }
+
+    .size-badge.large { background: var(--danger-dim); color: var(--danger); }
+    .size-badge.medium { background: var(--warning-dim); color: var(--warning); }
+    .size-badge.small { background: var(--bg-tertiary); color: var(--text-muted); }
+
+    /* ── Privacy Tab ── */
+    .privacy-view { flex: 1; overflow-y: auto; padding: 16px; }
+
+    .privacy-section {
+      background: var(--bg-card); border: 1px solid var(--border-color);
+      border-radius: 10px; padding: 16px; margin-bottom: 12px;
+    }
+
+    .privacy-section h3 {
+      font-size: 13px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 12px;
+    }
+
+    .privacy-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 0; border-bottom: 1px solid var(--border-color);
+    }
+
+    .privacy-row:last-child { border-bottom: none; }
+
+    .privacy-label { font-size: 13px; color: var(--text-secondary); }
+
+    .privacy-value {
+      font-size: 13px; font-weight: 500;
+      padding: 2px 8px; border-radius: 4px;
       background: var(--bg-tertiary);
-      color: var(--text-muted);
     }
+
+    .blocked-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 0; border-bottom: 1px solid var(--border-color);
+    }
+
+    .blocked-item:last-child { border-bottom: none; }
+
+    .blocked-phone { font-size: 13px; font-family: monospace; }
 
     /* ── Empty / QR States ── */
     .empty-state {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100%;
-      gap: 16px;
-      color: var(--text-muted);
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; height: 100%; gap: 16px; color: var(--text-muted);
     }
 
-    .empty-state .icon {
-      font-size: 48px;
-      opacity: 0.5;
-    }
+    .empty-state .icon { font-size: 48px; opacity: 0.5; }
 
     .empty-state p {
-      font-size: 14px;
-      text-align: center;
-      max-width: 300px;
-      line-height: 1.5;
+      font-size: 14px; text-align: center; max-width: 300px; line-height: 1.5;
     }
 
     .qr-container {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100%;
-      gap: 20px;
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; height: 100%; gap: 20px;
     }
 
-    .qr-container h2 {
-      font-size: 20px;
-      font-weight: 600;
-    }
+    .qr-container h2 { font-size: 20px; font-weight: 600; }
 
     .qr-container p {
-      font-size: 14px;
-      color: var(--text-secondary);
-      text-align: center;
-      max-width: 360px;
-      line-height: 1.5;
+      font-size: 14px; color: var(--text-secondary); text-align: center;
+      max-width: 360px; line-height: 1.5;
     }
 
-    .qr-code {
-      padding: 16px;
-      background: #fff;
-      border-radius: 12px;
-    }
+    .qr-code { padding: 16px; background: #fff; border-radius: 12px; }
 
-    .qr-code canvas {
-      display: block;
-    }
-
-    /* ── Stats Bar ── */
-    .stats-bar {
-      display: flex;
-      gap: 16px;
-      padding: 12px 16px;
-      border-bottom: 1px solid var(--border-color);
-      background: var(--bg-secondary);
-    }
-
-    .stat-item {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 13px;
-      color: var(--text-secondary);
-    }
-
-    .stat-item .value {
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-
-    /* ── Loading ── */
+    /* ── Loading / Toast ── */
     .loading {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      padding: 20px;
-      color: var(--text-muted);
-      font-size: 13px;
+      display: flex; align-items: center; justify-content: center;
+      gap: 8px; padding: 20px; color: var(--text-muted); font-size: 13px;
     }
 
     .spinner {
-      width: 16px;
-      height: 16px;
+      width: 16px; height: 16px;
       border: 2px solid var(--border-color);
       border-top-color: var(--accent);
       border-radius: 50%;
       animation: spin 0.6s linear infinite;
     }
 
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* ── Toast ── */
     .toast {
-      position: fixed;
-      bottom: 16px;
-      right: 16px;
-      padding: 10px 16px;
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 500;
-      background: var(--bg-card);
-      border: 1px solid var(--border-color);
+      position: fixed; bottom: 16px; right: 16px;
+      padding: 10px 16px; border-radius: 8px;
+      font-size: 13px; font-weight: 500;
+      background: var(--bg-card); border: 1px solid var(--border-color);
       color: var(--text-primary);
       box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-      transform: translateY(100px);
-      opacity: 0;
-      transition: all 0.3s ease;
-      z-index: 100;
+      transform: translateY(100px); opacity: 0;
+      transition: all 0.3s ease; z-index: 100;
     }
 
-    .toast.visible {
-      transform: translateY(0);
-      opacity: 1;
-    }
-
+    .toast.visible { transform: translateY(0); opacity: 1; }
     .toast.success { border-color: var(--accent); }
     .toast.error { border-color: var(--danger); }
 
-    /* ── Scrollbar ── */
+    /* ── Confirm Dialog ── */
+    .confirm-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 200;
+    }
+
+    .confirm-dialog {
+      background: var(--bg-card); border: 1px solid var(--border-color);
+      border-radius: 12px; padding: 24px; min-width: 320px; max-width: 400px;
+    }
+
+    .confirm-dialog h3 { font-size: 16px; margin-bottom: 8px; }
+    .confirm-dialog p { font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5; }
+
+    .confirm-dialog .actions { display: flex; gap: 8px; justify-content: flex-end; }
+
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb {
-      background: var(--border-color);
-      border-radius: 3px;
-    }
+    ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
   </style>
 </head>
@@ -574,9 +540,16 @@
       <span id="phoneNumber" style="font-size: 13px; color: var(--text-secondary);"></span>
     </div>
     <div class="header-actions">
-      <button class="btn" id="refreshBtn" title="Refresh groups">Refresh</button>
+      <button class="btn" id="refreshBtn" title="Refresh">Refresh</button>
       <button class="btn btn-primary" id="connectBtn">Connect</button>
     </div>
+  </div>
+
+  <!-- Tab Bar -->
+  <div class="tab-bar">
+    <button class="tab active" data-tab="chat">Groups</button>
+    <button class="tab" data-tab="audit">Audit</button>
+    <button class="tab" data-tab="privacy">Privacy</button>
   </div>
 
   <!-- Stats Bar -->
@@ -586,70 +559,140 @@
     <div class="stat-item">Reconnects <span class="value" id="reconnectStat">0</span></div>
   </div>
 
-  <!-- Main -->
-  <div class="main">
-    <!-- Sidebar -->
-    <div class="sidebar" id="sidebar">
-      <div class="sidebar-header">
-        <h2>Groups</h2>
-        <span class="group-count" id="groupCount">0</span>
+  <!-- ══ Chat Tab ══ -->
+  <div class="tab-content active" id="tabChat">
+    <div class="chat-view">
+      <!-- Sidebar -->
+      <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+          <h2>Groups</h2>
+          <span class="group-count" id="groupCount">0</span>
+        </div>
+        <div class="sidebar-search">
+          <input type="text" id="groupSearch" placeholder="Search groups...">
+        </div>
+        <div class="group-list" id="groupList">
+          <div class="empty-state" style="padding: 40px 16px;">
+            <span class="icon">&#x1F4AC;</span>
+            <p>Connect to WhatsApp to see your groups</p>
+          </div>
+        </div>
       </div>
-      <div class="sidebar-search">
-        <input type="text" id="groupSearch" placeholder="Search groups...">
-      </div>
-      <div class="group-list" id="groupList">
-        <div class="empty-state" style="padding: 40px 16px;">
-          <span class="icon">💬</span>
-          <p>Connect to WhatsApp to see your groups</p>
+
+      <!-- Content -->
+      <div class="content" id="contentArea">
+        <div class="empty-state" id="emptyState">
+          <span class="icon">&#x1F4AC;</span>
+          <p>Select a group from the sidebar to view details and send messages</p>
+        </div>
+
+        <!-- QR Code State -->
+        <div class="qr-container" id="qrState" style="display: none;">
+          <h2>Scan QR Code</h2>
+          <p>Open WhatsApp on your phone, go to Linked Devices, and scan this code.</p>
+          <div class="qr-code" id="qrCode"></div>
+          <p style="font-size: 12px; color: var(--text-muted);">QR code refreshes automatically.</p>
+        </div>
+
+        <!-- Group Detail Panel -->
+        <div class="info-panel" id="groupPanel" style="display: none;">
+          <div class="info-panel-header">
+            <h2 id="panelGroupName">Group Name</h2>
+            <div class="info-panel-actions">
+              <button class="btn btn-sm" id="inviteBtn">Invite Link</button>
+              <button class="btn btn-sm" id="membersBtn">Members</button>
+            </div>
+          </div>
+
+          <!-- Quick Actions -->
+          <div class="quick-actions" id="quickActions">
+            <button class="btn btn-sm" data-action="read" title="Mark as read">Mark Read</button>
+            <button class="btn btn-sm" data-action="mute" title="Mute group">Mute</button>
+            <button class="btn btn-sm" data-action="unmute" title="Unmute group">Unmute</button>
+            <button class="btn btn-sm" data-action="archive" title="Archive group">Archive</button>
+            <button class="btn btn-sm" data-action="pin" title="Pin group">Pin</button>
+            <button class="btn btn-sm" data-action="unpin" title="Unpin group">Unpin</button>
+            <button class="btn btn-sm btn-danger" data-action="leave" title="Leave group">Leave</button>
+          </div>
+
+          <!-- Compose -->
+          <div class="compose-area">
+            <div class="compose-form">
+              <textarea id="messageInput" placeholder="Type a message..." rows="1"></textarea>
+              <button class="btn btn-primary" id="sendBtn">Send</button>
+            </div>
+          </div>
+
+          <!-- Members -->
+          <div class="members-section" id="membersSection" style="display: none;">
+            <h3>Members</h3>
+            <div id="membersList"></div>
+          </div>
+
+          <!-- Invite Link Result -->
+          <div id="inviteResult" style="display: none; padding: 16px;">
+            <div style="background: var(--bg-tertiary); padding: 12px; border-radius: 8px; font-size: 13px; word-break: break-all;">
+              <span id="inviteLinkText"></span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
+  </div>
 
-    <!-- Content -->
-    <div class="content" id="contentArea">
-      <div class="empty-state" id="emptyState">
-        <span class="icon">💬</span>
-        <p>Select a group from the sidebar to view details and send messages</p>
+  <!-- ══ Audit Tab ══ -->
+  <div class="tab-content" id="tabAudit">
+    <div class="audit-view">
+      <div class="audit-toolbar">
+        <label>Sort by</label>
+        <select id="auditSort">
+          <option value="size">Size (largest)</option>
+          <option value="name">Name (A-Z)</option>
+          <option value="created">Created (oldest)</option>
+        </select>
+        <label style="margin-left: 12px;">Min members</label>
+        <select id="auditMinMembers">
+          <option value="0">All</option>
+          <option value="5">5+</option>
+          <option value="10">10+</option>
+          <option value="50">50+</option>
+          <option value="100">100+</option>
+        </select>
+        <div style="flex:1;"></div>
+        <button class="btn btn-sm" id="auditRefreshBtn">Run Audit</button>
       </div>
-
-      <!-- QR Code State -->
-      <div class="qr-container" id="qrState" style="display: none;">
-        <h2>Scan QR Code</h2>
-        <p>Open WhatsApp on your phone, go to Linked Devices, and scan this code to connect.</p>
-        <div class="qr-code" id="qrCode"></div>
-        <p style="font-size: 12px; color: var(--text-muted);">QR code refreshes automatically. Call status() after scanning.</p>
+      <div class="audit-summary" id="auditSummary" style="display:none;">
+        <div class="stat-item">Total groups <span class="value" id="auditTotal">0</span></div>
+        <div class="stat-item">Total members <span class="value" id="auditMembers">0</span></div>
+        <div class="stat-item">Admin in <span class="value" id="auditAdmin">0</span></div>
       </div>
-
-      <!-- Group Detail Panel -->
-      <div class="info-panel" id="groupPanel" style="display: none;">
-        <div class="info-panel-header">
-          <h2 id="panelGroupName">Group Name</h2>
-          <div class="info-panel-actions">
-            <button class="btn" id="inviteBtn">Invite Link</button>
-            <button class="btn" id="membersBtn">Members</button>
-          </div>
+      <div class="audit-table-wrap" id="auditTableWrap">
+        <div class="empty-state" style="padding: 60px 16px;">
+          <span class="icon">&#x1F50D;</span>
+          <p>Click "Run Audit" to scan all your groups</p>
         </div>
+      </div>
+    </div>
+  </div>
 
-        <!-- Compose -->
-        <div class="compose-area">
-          <div class="compose-form">
-            <textarea id="messageInput" placeholder="Type a message..." rows="1"></textarea>
-            <button class="btn btn-primary" id="sendBtn">Send</button>
-          </div>
+  <!-- ══ Privacy Tab ══ -->
+  <div class="tab-content" id="tabPrivacy">
+    <div class="privacy-view">
+      <div class="privacy-section">
+        <h3>Privacy Settings</h3>
+        <div id="privacySettings">
+          <div class="loading"><span class="spinner"></span> Load privacy settings to view</div>
         </div>
-
-        <!-- Members -->
-        <div class="members-section" id="membersSection" style="display: none;">
-          <h3>Members</h3>
-          <div id="membersList"></div>
+      </div>
+      <div class="privacy-section">
+        <h3>Blocked Contacts</h3>
+        <div id="blockedList">
+          <div class="loading"><span class="spinner"></span> Load blocked contacts to view</div>
         </div>
-
-        <!-- Invite Link Result -->
-        <div id="inviteResult" style="display: none; padding: 16px;">
-          <div style="background: var(--bg-tertiary); padding: 12px; border-radius: 8px; font-size: 13px; word-break: break-all;">
-            <span id="inviteLinkText"></span>
-          </div>
-        </div>
+      </div>
+      <div style="display: flex; gap: 8px; margin-top: 8px;">
+        <button class="btn" id="loadPrivacyBtn">Load Privacy Settings</button>
+        <button class="btn" id="loadBlockedBtn">Load Blocked Contacts</button>
       </div>
     </div>
   </div>
@@ -657,19 +700,8 @@
   <!-- Toast -->
   <div class="toast" id="toast"></div>
 
-  <!-- QR Code library (lightweight, no deps) -->
-  <script>
-    // Minimal QR code renderer — generates SVG from QR string data
-    // Uses the text-to-qr pattern since Baileys returns the QR as a string
-    function renderQR(text, container) {
-      // Create a simple table-based QR display using the qr data
-      // The QR data from Baileys is a string that encodes the pairing info
-      container.innerHTML = '<div style="font-size: 12px; color: var(--text-muted); padding: 20px; text-align: center;">' +
-        '<div style="font-family: monospace; word-break: break-all; background: #fff; color: #000; padding: 16px; border-radius: 8px; font-size: 11px; max-width: 300px; margin: 0 auto;">' +
-        text + '</div>' +
-        '<p style="margin-top: 12px;">Copy this code and use WhatsApp Web QR scanner</p></div>';
-    }
-  </script>
+  <!-- Confirm Dialog -->
+  <div class="confirm-overlay" id="confirmOverlay" style="display: none;"></div>
 
   <script>
     // ── State ──
@@ -681,20 +713,24 @@
       groups: [],
       selectedGroup: null,
       members: [],
+      auditData: [],
+      privacyData: null,
+      blockedData: null,
     };
 
-    // ── DOM refs ──
     const $ = id => document.getElementById(id);
 
     // ── MCP Result Parser ──
     function parseMCP(raw) {
       if (raw && raw.content && Array.isArray(raw.content)) {
         const item = raw.content.find(c => c.type === 'text' && c.text);
-        if (item) {
-          try { return JSON.parse(item.text); } catch(e) { return item.text; }
-        }
+        if (item) { try { return JSON.parse(item.text); } catch(e) { return item.text; } }
       }
       return raw;
+    }
+
+    function escapeHtml(s) {
+      const d = document.createElement('div'); d.textContent = s; return d.innerHTML;
     }
 
     // ── Toast ──
@@ -707,6 +743,36 @@
       toastTimer = setTimeout(() => el.className = 'toast', 3000);
     }
 
+    // ── Confirm Dialog ──
+    function confirm(title, message) {
+      return new Promise((resolve) => {
+        const overlay = $('confirmOverlay');
+        overlay.style.display = 'flex';
+        overlay.innerHTML =
+          '<div class="confirm-dialog">' +
+            '<h3>' + escapeHtml(title) + '</h3>' +
+            '<p>' + escapeHtml(message) + '</p>' +
+            '<div class="actions">' +
+              '<button class="btn" id="confirmCancel">Cancel</button>' +
+              '<button class="btn btn-danger" id="confirmOk">Confirm</button>' +
+            '</div>' +
+          '</div>';
+        $('confirmCancel').onclick = () => { overlay.style.display = 'none'; resolve(false); };
+        $('confirmOk').onclick = () => { overlay.style.display = 'none'; resolve(true); };
+      });
+    }
+
+    // ── Tab Switching ──
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        const target = tab.dataset.tab;
+        $('tab' + target.charAt(0).toUpperCase() + target.slice(1)).classList.add('active');
+      });
+    });
+
     // ── Render Functions ──
 
     function renderStatus() {
@@ -717,14 +783,8 @@
       const statsBar = $('statsBar');
 
       badge.className = 'status-badge ' + state.status;
-
-      const labels = {
-        connected: 'Connected',
-        disconnected: 'Disconnected',
-        qr_pending: 'QR Pending',
-      };
+      const labels = { connected: 'Connected', disconnected: 'Disconnected', qr_pending: 'QR Pending' };
       text.textContent = labels[state.status] || state.status;
-
       phone.textContent = state.phone ? '+' + state.phone : '';
 
       if (state.status === 'connected') {
@@ -753,8 +813,8 @@
 
       if (filtered.length === 0) {
         list.innerHTML = '<div class="empty-state" style="padding: 40px 16px;">' +
-          '<span class="icon">' + (state.groups.length === 0 ? '💬' : '🔍') + '</span>' +
-          '<p>' + (state.groups.length === 0 ? 'Connect to WhatsApp to see your groups' : 'No groups match your search') + '</p></div>';
+          '<span class="icon">' + (state.groups.length === 0 ? '&#x1F4AC;' : '&#x1F50D;') + '</span>' +
+          '<p>' + (state.groups.length === 0 ? 'Connect to see groups' : 'No groups match') + '</p></div>';
         return;
       }
 
@@ -769,7 +829,6 @@
           '</div></div>';
       }).join('');
 
-      // Click handlers
       list.querySelectorAll('.group-item').forEach(el => {
         el.addEventListener('click', () => selectGroup(el.dataset.jid));
       });
@@ -790,7 +849,6 @@
       empty.style.display = 'none';
       qr.style.display = 'none';
       panel.style.display = 'flex';
-
       $('panelGroupName').textContent = state.selectedGroup.name;
       $('membersSection').style.display = 'none';
       $('inviteResult').style.display = 'none';
@@ -815,11 +873,79 @@
       }).join('');
     }
 
+    // ── Audit Rendering ──
+
+    function renderAudit() {
+      const data = state.auditData;
+      if (data.length === 0) {
+        $('auditTableWrap').innerHTML = '<div class="empty-state" style="padding: 60px 16px;">' +
+          '<span class="icon">&#x1F50D;</span><p>No groups found</p></div>';
+        $('auditSummary').style.display = 'none';
+        return;
+      }
+
+      $('auditSummary').style.display = 'flex';
+      $('auditTotal').textContent = data.length;
+      $('auditMembers').textContent = data.reduce((s, g) => s + g.members, 0);
+      $('auditAdmin').textContent = data.filter(g => g.admins > 0).length;
+
+      $('auditTableWrap').innerHTML =
+        '<table class="audit-table"><thead><tr>' +
+        '<th>Name</th><th>Members</th><th>Admins</th><th>Created</th><th>Ephemeral</th><th>Actions</th>' +
+        '</tr></thead><tbody>' +
+        data.map(g => {
+          const sizeClass = g.members >= 50 ? 'large' : g.members >= 10 ? 'medium' : 'small';
+          return '<tr>' +
+            '<td><span style="font-weight:500;">' + escapeHtml(g.name) + '</span>' +
+            '<div style="font-size:11px;color:var(--text-muted);">' + g.jid.split('@')[0] + '</div></td>' +
+            '<td><span class="size-badge ' + sizeClass + '">' + g.members + '</span></td>' +
+            '<td>' + g.admins + '</td>' +
+            '<td style="color:var(--text-secondary);">' + g.created + '</td>' +
+            '<td style="color:var(--text-secondary);">' + g.ephemeral + '</td>' +
+            '<td class="actions">' +
+              '<button class="btn btn-sm" onclick="auditAction(\'archive\',\'' + g.jid + '\')">Archive</button>' +
+              '<button class="btn btn-sm btn-danger" onclick="auditAction(\'leave\',\'' + g.jid + '\')">Leave</button>' +
+            '</td></tr>';
+        }).join('') +
+        '</tbody></table>';
+    }
+
+    // ── Privacy Rendering ──
+
+    function renderPrivacy() {
+      const data = state.privacyData;
+      if (!data) return;
+      const rows = Object.entries(data).map(([key, val]) =>
+        '<div class="privacy-row">' +
+          '<span class="privacy-label">' + escapeHtml(key) + '</span>' +
+          '<span class="privacy-value">' + escapeHtml(String(val)) + '</span>' +
+        '</div>'
+      ).join('');
+      $('privacySettings').innerHTML = rows || '<p style="color:var(--text-muted);font-size:13px;">No settings available</p>';
+    }
+
+    function renderBlocked() {
+      const data = state.blockedData;
+      if (!data || data.length === 0) {
+        $('blockedList').innerHTML = '<p style="color:var(--text-muted);font-size:13px;padding:8px 0;">No blocked contacts</p>';
+        return;
+      }
+      $('blockedList').innerHTML = data.map(b => {
+        const phone = (b.jid || b).split('@')[0];
+        return '<div class="blocked-item">' +
+          '<span class="blocked-phone">+' + phone + '</span>' +
+          '<button class="btn btn-sm" onclick="unblockContact(\'' + (b.jid || b) + '\')">Unblock</button>' +
+          '</div>';
+      }).join('');
+    }
+
     function showQR(qrData) {
       $('emptyState').style.display = 'none';
       $('groupPanel').style.display = 'none';
       $('qrState').style.display = 'flex';
-      renderQR(qrData, $('qrCode'));
+      $('qrCode').innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:20px;text-align:center;">' +
+        '<div style="font-family:monospace;word-break:break-all;background:#fff;color:#000;padding:16px;border-radius:8px;font-size:11px;max-width:300px;margin:0 auto;">' +
+        qrData + '</div><p style="margin-top:12px;">Copy this code and use WhatsApp Web QR scanner</p></div>';
     }
 
     // ── Actions ──
@@ -836,9 +962,7 @@
           if (data.qr) showQR(data.qr);
           renderStatus();
         }
-      } catch (e) {
-        console.error('Status fetch failed:', e);
-      }
+      } catch (e) { console.error('Status fetch failed:', e); }
     }
 
     async function loadGroups() {
@@ -850,9 +974,7 @@
           renderGroups();
           renderStatus();
         }
-      } catch (e) {
-        toast('Failed to load groups: ' + (e.message || e), 'error');
-      }
+      } catch (e) { toast('Failed to load groups', 'error'); }
     }
 
     async function selectGroup(jid) {
@@ -862,71 +984,47 @@
       state.members = [];
       renderGroups();
       renderGroupPanel();
-      // Load members
       loadMembers(group);
     }
 
     async function loadMembers(group) {
       $('membersSection').style.display = 'block';
-      $('membersList').innerHTML = '<div class="loading"><span class="spinner"></span> Loading members...</div>';
+      $('membersList').innerHTML = '<div class="loading"><span class="spinner"></span> Loading...</div>';
       try {
         const raw = await window.photon.callTool('members', { chat: group.jid });
         const data = parseMCP(raw);
-        if (Array.isArray(data)) {
-          state.members = data;
-          renderMembers();
-        }
+        if (Array.isArray(data)) { state.members = data; renderMembers(); }
       } catch (e) {
-        $('membersList').innerHTML = '<p style="color: var(--text-muted); font-size: 13px; padding: 8px 0;">Failed to load members</p>';
+        $('membersList').innerHTML = '<p style="color:var(--text-muted);font-size:13px;">Failed to load members</p>';
       }
     }
 
     async function connectWhatsApp() {
       if (state.status === 'connected') {
-        // Disconnect
         try {
           await window.photon.callTool('disconnect', {});
-          state.status = 'disconnected';
-          state.phone = '';
-          state.groups = [];
-          state.selectedGroup = null;
-          renderStatus();
-          renderGroups();
-          renderGroupPanel();
-          toast('Disconnected from WhatsApp', 'success');
-        } catch (e) {
-          toast('Disconnect failed: ' + (e.message || e), 'error');
-        }
+          state.status = 'disconnected'; state.phone = ''; state.groups = []; state.selectedGroup = null;
+          renderStatus(); renderGroups(); renderGroupPanel();
+          toast('Disconnected', 'success');
+        } catch (e) { toast('Disconnect failed', 'error'); }
         return;
       }
-
       $('connectBtn').disabled = true;
       $('connectBtn').textContent = 'Connecting...';
       try {
         const raw = await window.photon.callTool('connect', {});
         const data = parseMCP(raw);
         if (data.status === 'qr_pending' && data.qr) {
-          showQR(data.qr);
-          state.status = 'qr_pending';
-          renderStatus();
+          showQR(data.qr); state.status = 'qr_pending'; renderStatus();
           toast('Scan QR code with WhatsApp', 'info');
-          // Poll for connection
           pollConnection();
         } else if (data.status === 'connected' || data.status === 'already_connected') {
-          state.status = 'connected';
-          state.phone = data.phone || '';
-          renderStatus();
-          $('qrState').style.display = 'none';
-          $('emptyState').style.display = 'flex';
-          toast('Connected to WhatsApp!', 'success');
-          loadGroups();
+          state.status = 'connected'; state.phone = data.phone || '';
+          renderStatus(); $('qrState').style.display = 'none'; $('emptyState').style.display = 'flex';
+          toast('Connected!', 'success'); loadGroups();
         }
-      } catch (e) {
-        toast('Connection failed: ' + (e.message || e), 'error');
-      } finally {
-        $('connectBtn').disabled = false;
-        renderStatus();
-      }
+      } catch (e) { toast('Connection failed', 'error'); }
+      finally { $('connectBtn').disabled = false; renderStatus(); }
     }
 
     let pollTimer;
@@ -936,10 +1034,8 @@
         await refreshStatus();
         if (state.status === 'connected') {
           clearInterval(pollTimer);
-          $('qrState').style.display = 'none';
-          $('emptyState').style.display = 'flex';
-          toast('Connected to WhatsApp!', 'success');
-          loadGroups();
+          $('qrState').style.display = 'none'; $('emptyState').style.display = 'flex';
+          toast('Connected!', 'success'); loadGroups();
         }
       }, 3000);
     }
@@ -949,26 +1045,14 @@
       const input = $('messageInput');
       const text = input.value.trim();
       if (!text) return;
-
       $('sendBtn').disabled = true;
       try {
-        const raw = await window.photon.callTool('send', {
-          chat: state.selectedGroup.jid,
-          text: text,
-        });
+        const raw = await window.photon.callTool('send', { chat: state.selectedGroup.jid, text });
         const data = parseMCP(raw);
-        input.value = '';
-        input.style.height = 'auto';
-        if (data && data.queued) {
-          toast('Message queued (offline)', 'info');
-        } else {
-          toast('Message sent to ' + state.selectedGroup.name, 'success');
-        }
-      } catch (e) {
-        toast('Send failed: ' + (e.message || e), 'error');
-      } finally {
-        $('sendBtn').disabled = false;
-      }
+        input.value = ''; input.style.height = 'auto';
+        toast(data && data.queued ? 'Message queued' : 'Sent to ' + state.selectedGroup.name, 'success');
+      } catch (e) { toast('Send failed', 'error'); }
+      finally { $('sendBtn').disabled = false; }
     }
 
     async function getInviteLink() {
@@ -982,19 +1066,152 @@
           $('inviteResult').style.display = 'block';
           toast('Invite link generated', 'success');
         }
-      } catch (e) {
-        toast('Failed to get invite link: ' + (e.message || e), 'error');
-      } finally {
-        $('inviteBtn').disabled = false;
+      } catch (e) { toast('Failed to get invite link', 'error'); }
+      finally { $('inviteBtn').disabled = false; }
+    }
+
+    // ── Quick Actions ──
+
+    async function quickAction(action) {
+      if (!state.selectedGroup) return;
+      const jid = state.selectedGroup.jid;
+      const name = state.selectedGroup.name;
+
+      if (action === 'leave') {
+        const ok = await confirm('Leave Group', 'Are you sure you want to leave "' + name + '"? This cannot be undone.');
+        if (!ok) return;
+        try {
+          await window.photon.callTool('leave', { chat: jid });
+          toast('Left ' + name, 'success');
+          state.selectedGroup = null;
+          state.groups = state.groups.filter(g => g.jid !== jid);
+          renderGroups(); renderGroupPanel();
+        } catch (e) { toast('Failed to leave group', 'error'); }
+        return;
+      }
+
+      if (action === 'read') {
+        try {
+          await window.photon.callTool('read', { chat: jid });
+          toast('Marked as read', 'success');
+        } catch (e) { toast('Failed', 'error'); }
+        return;
+      }
+
+      if (action === 'mute') {
+        try {
+          await window.photon.callTool('mute', { chat: jid, duration: '8h' });
+          toast('Muted for 8 hours', 'success');
+        } catch (e) { toast('Failed to mute', 'error'); }
+        return;
+      }
+
+      if (action === 'unmute') {
+        try {
+          await window.photon.callTool('mute', { chat: jid, duration: '0' });
+          toast('Unmuted', 'success');
+        } catch (e) { toast('Failed to unmute', 'error'); }
+        return;
+      }
+
+      if (action === 'archive' || action === 'unarchive') {
+        try {
+          await window.photon.callTool('archive', { chat: jid, undo: action === 'unarchive' });
+          toast(action === 'archive' ? 'Archived' : 'Unarchived', 'success');
+        } catch (e) { toast('Failed', 'error'); }
+        return;
+      }
+
+      if (action === 'pin' || action === 'unpin') {
+        try {
+          await window.photon.callTool('pin', { chat: jid, undo: action === 'unpin' });
+          toast(action === 'pin' ? 'Pinned' : 'Unpinned', 'success');
+        } catch (e) { toast('Failed', 'error'); }
+        return;
       }
     }
 
-    // ── Helpers ──
+    // ── Audit Actions ──
 
-    function escapeHtml(str) {
-      const div = document.createElement('div');
-      div.textContent = str;
-      return div.innerHTML;
+    async function runAudit() {
+      $('auditRefreshBtn').disabled = true;
+      $('auditRefreshBtn').textContent = 'Scanning...';
+      $('auditTableWrap').innerHTML = '<div class="loading"><span class="spinner"></span> Auditing all groups...</div>';
+      try {
+        const sort = $('auditSort').value;
+        const minMembers = parseInt($('auditMinMembers').value) || 0;
+        const raw = await window.photon.callTool('audit', { sort, minMembers });
+        const data = parseMCP(raw);
+        if (Array.isArray(data)) {
+          state.auditData = data;
+          renderAudit();
+          toast('Audit complete: ' + data.length + ' groups', 'success');
+        }
+      } catch (e) { toast('Audit failed: ' + (e.message || e), 'error'); }
+      finally {
+        $('auditRefreshBtn').disabled = false;
+        $('auditRefreshBtn').textContent = 'Run Audit';
+      }
+    }
+
+    async function auditAction(action, jid) {
+      if (action === 'leave') {
+        const group = state.auditData.find(g => g.jid === jid);
+        const name = group ? group.name : jid;
+        const ok = await confirm('Leave Group', 'Are you sure you want to leave "' + name + '"?');
+        if (!ok) return;
+        try {
+          await window.photon.callTool('leave', { chat: jid });
+          state.auditData = state.auditData.filter(g => g.jid !== jid);
+          state.groups = state.groups.filter(g => g.jid !== jid);
+          renderAudit(); renderGroups();
+          toast('Left ' + name, 'success');
+        } catch (e) { toast('Failed to leave', 'error'); }
+      } else if (action === 'archive') {
+        try {
+          await window.photon.callTool('archive', { chat: jid });
+          toast('Archived', 'success');
+        } catch (e) { toast('Failed to archive', 'error'); }
+      }
+    }
+
+    // ── Privacy Actions ──
+
+    async function loadPrivacy() {
+      $('privacySettings').innerHTML = '<div class="loading"><span class="spinner"></span> Loading...</div>';
+      try {
+        const raw = await window.photon.callTool('privacy', {});
+        const data = parseMCP(raw);
+        if (data && typeof data === 'object') {
+          state.privacyData = data;
+          renderPrivacy();
+        }
+      } catch (e) {
+        $('privacySettings').innerHTML = '<p style="color:var(--text-muted);font-size:13px;">Failed to load privacy settings</p>';
+      }
+    }
+
+    async function loadBlocked() {
+      $('blockedList').innerHTML = '<div class="loading"><span class="spinner"></span> Loading...</div>';
+      try {
+        const raw = await window.photon.callTool('blocked', {});
+        const data = parseMCP(raw);
+        if (Array.isArray(data)) {
+          state.blockedData = data;
+          renderBlocked();
+        }
+      } catch (e) {
+        $('blockedList').innerHTML = '<p style="color:var(--text-muted);font-size:13px;">Failed to load blocked contacts</p>';
+      }
+    }
+
+    async function unblockContact(jid) {
+      try {
+        await window.photon.callTool('unblock', { phone: jid.split('@')[0] });
+        state.blockedData = (state.blockedData || []).filter(b => (b.jid || b) !== jid);
+        renderBlocked();
+        toast('Unblocked', 'success');
+      } catch (e) { toast('Failed to unblock', 'error'); }
     }
 
     // ── Auto-resize textarea ──
@@ -1003,12 +1220,8 @@
       this.style.height = Math.min(this.scrollHeight, 120) + 'px';
     });
 
-    // ── Enter to send ──
     $('messageInput').addEventListener('keydown', function(e) {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendMessage();
-      }
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
     });
 
     // ── Event Listeners ──
@@ -1023,32 +1236,34 @@
       const sec = $('membersSection');
       if (sec.style.display === 'none') {
         sec.style.display = 'block';
-        if (state.selectedGroup && state.members.length === 0) {
-          loadMembers(state.selectedGroup);
-        }
-      } else {
-        sec.style.display = 'none';
-      }
+        if (state.selectedGroup && state.members.length === 0) loadMembers(state.selectedGroup);
+      } else { sec.style.display = 'none'; }
     });
     $('groupSearch').addEventListener('input', renderGroups);
+    $('auditRefreshBtn').addEventListener('click', runAudit);
+    $('auditSort').addEventListener('change', runAudit);
+    $('auditMinMembers').addEventListener('change', runAudit);
+    $('loadPrivacyBtn').addEventListener('click', loadPrivacy);
+    $('loadBlockedBtn').addEventListener('click', loadBlocked);
+
+    // Quick actions
+    $('quickActions').querySelectorAll('[data-action]').forEach(btn => {
+      btn.addEventListener('click', () => quickAction(btn.dataset.action));
+    });
 
     // ── Theme ──
     if (window.photon) {
-      if (window.photon.theme === 'light') {
-        document.documentElement.classList.add('light');
-      }
+      if (window.photon.theme === 'light') document.documentElement.classList.add('light');
       window.photon.onThemeChange(theme => {
         document.documentElement.classList.toggle('light', theme === 'light');
       });
     }
 
-    // ── onResult: handle status() results pushed by host ──
+    // ── onResult ──
     if (window.photon) {
       window.photon.onResult((result) => {
         const data = parseMCP(result);
         if (!data || typeof data !== 'object') return;
-
-        // Status result
         if ('status' in data && ('phone' in data || 'queuedMessages' in data)) {
           state.status = data.status || state.status;
           state.phone = data.phone || state.phone;
@@ -1056,16 +1271,12 @@
           state.reconnectAttempts = data.reconnectAttempts || 0;
           renderStatus();
           if (data.qr) showQR(data.qr);
-        }
-        // Groups result
-        else if (Array.isArray(data) && data.length > 0 && data[0].jid && data[0].name) {
+        } else if (Array.isArray(data) && data.length > 0 && data[0].jid && data[0].name) {
           state.groups = data.sort((a, b) => a.name.localeCompare(b.name));
-          renderGroups();
-          renderStatus();
+          renderGroups(); renderStatus();
         }
       });
 
-      // Initial load
       refreshStatus().then(() => {
         if (state.status === 'connected') loadGroups();
       });
