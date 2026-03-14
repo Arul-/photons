@@ -282,7 +282,7 @@ export default class WhatsApp extends Photon {
    *
    * @title Send Message
    * @openWorld
-   * @param chat Group name, phone number, or JID {@example "Arul and Lura"}
+   * @param chat Group name, phone number, or JID {@choice-from groups.name} {@example "Arul and Lura"}
    * @param text Message text to send
    */
   async send(params: { chat: string; text: string }): Promise<{ queued: boolean; key?: MessageKey }> {
@@ -330,7 +330,7 @@ export default class WhatsApp extends Photon {
    *
    * @title Reply to Message
    * @openWorld
-   * @param chat Group name, phone number, or JID
+   * @param chat Group name, phone number, or JID {@choice-from groups.name}
    * @param text Reply text
    * @param quotedId Message ID to reply to (from inbound message's messageId field)
    */
@@ -355,7 +355,7 @@ export default class WhatsApp extends Photon {
    *
    * @title React to Message
    * @openWorld
-   * @param chat Group name, phone number, or JID
+   * @param chat Group name, phone number, or JID {@choice-from groups.name}
    * @param messageId Message ID to react to
    * @param emoji Emoji to react with (e.g. "👍"), or empty string to remove {@example "👍"}
    */
@@ -379,7 +379,7 @@ export default class WhatsApp extends Photon {
    *
    * @title Send Media
    * @openWorld
-   * @param chat Group name, phone number, or JID
+   * @param chat Group name, phone number, or JID {@choice-from groups.name}
    * @param url URL or local file path of the media
    * @param type Media type {@choice image, video, audio, document}
    * @param caption Optional caption for the media
@@ -498,7 +498,7 @@ export default class WhatsApp extends Photon {
    * @title Group Invite Link
    * @readOnly
    * @openWorld
-   * @param chat Group name or JID
+   * @param chat Group name or JID {@choice-from groups.name}
    */
   async invite(params: { chat: string }): Promise<{ link: string }> {
     if (!this.connected || !this.sock) {
@@ -521,7 +521,7 @@ export default class WhatsApp extends Photon {
    * @readOnly
    * @openWorld
    * @format table
-   * @param chat Group name or JID
+   * @param chat Group name or JID {@choice-from groups.name}
    */
   async members(params: { chat: string }): Promise<Array<{ jid: string; admin: string }>> {
     if (!this.connected || !this.sock) {
@@ -546,7 +546,7 @@ export default class WhatsApp extends Photon {
    * @title Group Admin
    * @destructive
    * @openWorld
-   * @param chat Group name or JID
+   * @param chat Group name or JID {@choice-from groups.name}
    * @param action Admin action to perform {@choice add, remove, promote, demote}
    * @param members Array of member JIDs to act on
    */
@@ -617,7 +617,7 @@ export default class WhatsApp extends Photon {
    *
    * @title Set Typing Indicator
    * @openWorld
-   * @param chat Group name, phone number, or JID
+   * @param chat Group name, phone number, or JID {@choice-from groups.name}
    * @param typing True to show composing, false to clear
    */
   async typing(params: { chat: string; typing: boolean }): Promise<void> {
