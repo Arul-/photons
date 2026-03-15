@@ -221,10 +221,16 @@ export default class WhatsApp extends Photon {
         printQRInTerminal: false,
         browser: Browsers.macOS('Desktop'),
         logger: this._logger,
-        // Reduce sync traffic — we handle group sync ourselves on a schedule
+        // Minimize phone-side "Syncing" notifications:
+        // - syncFullHistory: false → don't request full history from phone
+        // - markOnlineOnConnect: false → don't announce presence on connect
+        // - fireInitQueries: false → skip privacy/blocklist/props queries (reduces server traffic)
+        // - shouldSyncHistoryMessage: () => false → reject all history sync requests
+        // Note: phone still shows "syncing" on reconnect (protocol-level, unavoidable)
+        // — the only real mitigation is keeping the connection alive
         syncFullHistory: false,
         markOnlineOnConnect: false,
-        fireInitQueries: true,
+        fireInitQueries: false,
         shouldSyncHistoryMessage: () => false,
       });
 
@@ -1453,7 +1459,7 @@ export default class WhatsApp extends Photon {
       logger: this._logger,
       syncFullHistory: false,
       markOnlineOnConnect: false,
-      fireInitQueries: true,
+      fireInitQueries: false,
       shouldSyncHistoryMessage: () => false,
     });
 
