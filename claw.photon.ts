@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+
 import { Photon } from '@portel/photon-core';
 
 /**
@@ -44,6 +47,10 @@ export default class Claw extends Photon {
     maxMessageLog: 200,
     /** Name prefix the agent uses when sending messages (e.g. "Lura: ..."). Also acts as loop-prevention sentinel. */
     agentName: 'Lura',
+    /** Max recent conversations to keep in conversation.md before compaction */
+    maxConversations: 3,
+    /** Cron schedule for memory compaction (default: 3am daily) */
+    compactCron: '0 3 * * *',
   };
 
   async onInitialize(ctx?: { reason?: string; oldInstance?: any }): Promise<void> {
@@ -73,6 +80,12 @@ export default class Claw extends Photon {
     const savedSessions = await this.memory.get<Record<string, string>>('sessionMap');
     if (savedSessions) this.sessionMap = savedSessions;
 
+
+    // Schedule memory compaction for memory-enabled groups
+    const hasMemoryGroups = Object.values(this.registry).some(c => c.memory);
+    if (hasMemoryGroups) {
+      this._scheduleCompaction().catch(() => {});
+    }
 
     const wasRunning = await this.memory.get<boolean>('running');
     if (wasRunning && this.settings.autoResume) {
@@ -218,6 +231,7 @@ export default class Claw extends Photon {
    * @param requiresTrigger Only route messages containing the trigger (default: true when trigger is non-empty)
    * @param systemPrompt System prompt prepended to every agent run for this group {@example "You are Lura, a concise personal assistant."}
    * @param agent Agent to use for this group ('claude'|'gemini'|'aider'|'opencode'|'auto') {@example "claude"}
+   * @param memory Enable persistent memory system for this group (conversation.md + bucketed .md files)
    */
   async register(params: {
     group: string;
@@ -226,6 +240,7 @@ export default class Claw extends Photon {
     requiresTrigger?: boolean;
     systemPrompt?: string;
     agent?: string;
+    memory?: boolean;
   }): Promise<{ name: string } & GroupConfig> {
     const waGroups = await this.whatsapp.groups();
     const query = params.group.toLowerCase();
@@ -246,6 +261,7 @@ export default class Claw extends Photon {
       allowedSenders: [],
       systemPrompt: params.systemPrompt ?? '',
       agent: params.agent ?? 'claude',
+      memory: params.memory ?? false,
     };
 
     this.registry[match.name] = config;
@@ -295,6 +311,7 @@ export default class Claw extends Photon {
    * @param requiresTrigger Override trigger requirement
    * @param systemPrompt System prompt for this group's agent {@example "You are Lura, a concise personal assistant."}
    * @param agent Switch to a different agent ('claude'|'gemini'|'aider'|'opencode'|'auto') {@example "gemini"}
+   * @param memory Enable or disable persistent memory for this group
    */
   async configure(params: {
     group: string;
@@ -303,6 +320,7 @@ export default class Claw extends Photon {
     requiresTrigger?: boolean;
     systemPrompt?: string;
     agent?: string;
+    memory?: boolean;
   }): Promise<{ name: string } & GroupConfig> {
     const query = params.group.toLowerCase();
     const name = Object.keys(this.registry).find(k => k.toLowerCase().includes(query));
@@ -320,6 +338,7 @@ export default class Claw extends Photon {
     if (params.folders !== undefined) config.folders = params.folders;
     if (params.systemPrompt !== undefined) config.systemPrompt = params.systemPrompt;
     if (params.agent !== undefined) config.agent = params.agent;
+    if (params.memory !== undefined) config.memory = params.memory;
 
     await this.memory.set('registry', this.registry);
 
@@ -595,11 +614,21 @@ export default class Claw extends Photon {
     const sessionKey = `${config.agent}:${primaryFolder}`;
     const sessionId = this.sessionMap[sessionKey] ?? (config.agent === 'claude' ? this.sessionMap[primaryFolder] : undefined);
 
+    // Build memory-augmented system prompt for scheduled runs
+    let systemPrompt = config.systemPrompt || '';
+    if (config.memory) {
+      const memoryCtx = await this._buildMemoryPrompt(primaryFolder);
+      if (memoryCtx) {
+        systemPrompt = systemPrompt ? `${systemPrompt}\n\n${memoryCtx}` : memoryCtx;
+      }
+    }
+
     const result = await this.router.run({
       groupFolder: primaryFolder,
       prompt,
       agent: config.agent,
       sessionId,
+      ...(systemPrompt ? { systemPrompt } : {}),
       ...(config.folders.slice(1).length > 0 ? { addDirs: config.folders.slice(1) } : {}),
     });
 
@@ -609,6 +638,10 @@ export default class Claw extends Photon {
     }
 
     if (result.status === 'success' && result.output) {
+      // Append scheduled run to conversation log
+      if (config.memory) {
+        this._appendConversation(primaryFolder, `[Scheduled] ${prompt}`, result.output, 'System').catch(() => {});
+      }
       await this._sendAgentResponse(groupName, result.output, primaryFolder, result.duration);
     }
   }
@@ -741,6 +774,16 @@ export default class Claw extends Photon {
     const sessionKey = `${config.agent}:${primaryFolder}`;
     const sessionId = this.sessionMap[sessionKey] ?? (config.agent === 'claude' ? this.sessionMap[primaryFolder] : undefined);
 
+    // Build memory-augmented system prompt if memory is enabled
+    let systemPrompt = config.systemPrompt || '';
+    if (config.memory) {
+      this._ensureMemoryDir(primaryFolder);
+      const memoryCtx = await this._buildMemoryPrompt(primaryFolder);
+      if (memoryCtx) {
+        systemPrompt = systemPrompt ? `${systemPrompt}\n\n${memoryCtx}` : memoryCtx;
+      }
+    }
+
     let result: any;
     try {
       result = await this.router.run({
@@ -749,7 +792,7 @@ export default class Claw extends Photon {
         chatJid: event.chatJid,
         agent: config.agent,
         sessionId,
-        ...(config.systemPrompt ? { systemPrompt: config.systemPrompt } : {}),
+        ...(systemPrompt ? { systemPrompt } : {}),
         ...(addDirs.length > 0 ? { addDirs } : {}),
       });
     } finally {
@@ -763,6 +806,12 @@ export default class Claw extends Photon {
     }
 
     if (result.status === 'success' && result.output) {
+      // Append conversation round-trip to memory (non-blocking)
+      if (config.memory) {
+        this._appendConversation(primaryFolder, msg.content, result.output, msg.senderName).catch((err) => {
+          this.emit({ type: 'memory_error', group: name, error: err.message });
+        });
+      }
       await this._sendAgentResponse(name, result.output, primaryFolder, result.duration, ackKey);
     } else if (result.error) {
       this.emit({ type: 'error', source: 'agent-runner', group: name, error: result.error });
@@ -875,6 +924,262 @@ export default class Claw extends Photon {
   private _esc(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
+
+  // ─── Memory System ──────────────────────────────────────────────
+
+  /** Get the memory directory path for a group folder */
+  private _memoryDir(groupFolder: string): string {
+    // Memory lives inside the group's working directory
+    const baseDir = path.join(process.env.HOME || '', 'Projects');
+    return path.join(baseDir, groupFolder, 'memory');
+  }
+
+  /** Ensure memory directory and seed empty bucket files */
+  private _ensureMemoryDir(groupFolder: string): string {
+    const dir = this._memoryDir(groupFolder);
+    fs.mkdirSync(dir, { recursive: true });
+
+    const buckets = ['decisions.md', 'preferences.md', 'rules.md'];
+    for (const bucket of buckets) {
+      const filePath = path.join(dir, bucket);
+      if (!fs.existsSync(filePath)) {
+        const title = bucket.replace('.md', '');
+        fs.writeFileSync(filePath, `# ${title.charAt(0).toUpperCase() + title.slice(1)}\n\n`);
+      }
+    }
+
+    // Ensure conversation.md exists
+    const convPath = path.join(dir, 'conversation.md');
+    if (!fs.existsSync(convPath)) {
+      fs.writeFileSync(convPath, '# Conversation History\n\n');
+    }
+
+    return dir;
+  }
+
+  /** Append a completed round-trip (user query + agent response) to conversation.md and log.jsonl */
+  private async _appendConversation(
+    groupFolder: string,
+    userMessage: string,
+    agentResponse: string,
+    senderName: string,
+  ): Promise<void> {
+    const dir = this._ensureMemoryDir(groupFolder);
+    const timestamp = new Date().toISOString();
+    const dateStr = new Date().toLocaleString();
+
+    // Append to conversation.md
+    const convPath = path.join(dir, 'conversation.md');
+    const entry = `## ${dateStr}\n**${senderName}:** ${userMessage}\n**Agent:** ${agentResponse}\n\n`;
+    await fs.promises.appendFile(convPath, entry);
+
+    // Append to log.jsonl (one JSON object per line)
+    const logPath = path.join(dir, 'log.jsonl');
+    const logEntry = JSON.stringify({
+      timestamp,
+      sender: senderName,
+      user: userMessage.slice(0, 1000),
+      agent: agentResponse.slice(0, 2000),
+    }) + '\n';
+    await fs.promises.appendFile(logPath, logEntry);
+
+    // Enforce conversation limit — keep last N conversations
+    await this._trimConversations(convPath);
+  }
+
+  /** Keep only the last maxConversations entries in conversation.md */
+  private async _trimConversations(convPath: string): Promise<void> {
+    const content = await fs.promises.readFile(convPath, 'utf-8');
+    const sections = content.split(/^## /m).filter(s => s.trim());
+    const max = this.settings.maxConversations;
+
+    if (sections.length <= max + 1) return; // +1 for the title section
+
+    // Keep the title line and the last N conversation sections
+    const title = '# Conversation History\n\n';
+    const kept = sections.slice(-max).map(s => `## ${s}`).join('');
+    await fs.promises.writeFile(convPath, title + kept);
+  }
+
+  /** Read memory files and build a memory context block for the agent */
+  private async _buildMemoryPrompt(groupFolder: string): Promise<string> {
+    const dir = this._memoryDir(groupFolder);
+    if (!fs.existsSync(dir)) return '';
+
+    const parts: string[] = [];
+
+    // Read bucket files — only include non-empty ones
+    for (const bucket of ['decisions.md', 'preferences.md', 'rules.md']) {
+      const filePath = path.join(dir, bucket);
+      try {
+        const content = await fs.promises.readFile(filePath, 'utf-8');
+        // Skip if only has the title line
+        const lines = content.split('\n').filter(l => l.trim() && !l.startsWith('#'));
+        if (lines.length > 0) {
+          parts.push(content.trim());
+        }
+      } catch { /* file doesn't exist yet */ }
+    }
+
+    // Read conversation.md
+    const convPath = path.join(dir, 'conversation.md');
+    try {
+      const conv = await fs.promises.readFile(convPath, 'utf-8');
+      const lines = conv.split('\n').filter(l => l.trim() && !l.startsWith('#'));
+      if (lines.length > 0) {
+        parts.push(conv.trim());
+      }
+    } catch { /* no conversations yet */ }
+
+    if (parts.length === 0) return '';
+
+    return `<memory>\n${parts.join('\n\n---\n\n')}\n</memory>\n\nThe above is your persistent memory from previous conversations. Use it for context. The memory/ directory also contains a log.jsonl file with the full raw history — grep it if you need older details.`;
+  }
+
+  /**
+   * Compact conversation history into bucketed memory files.
+   * Reads conversation.md and log.jsonl, uses an LLM to categorize facts,
+   * and writes to decisions.md, preferences.md, rules.md.
+   *
+   * @title Compact Memory
+   * @param group Group name (partial match) {@example "Arul and Lura"}
+   * @internal
+   */
+  async compact(params: { group: string }): Promise<{ compacted: number; decisions: number; preferences: number; rules: number }> {
+    const query = params.group.toLowerCase();
+    const name = Object.keys(this.registry).find(k => k.toLowerCase().includes(query));
+    if (!name) throw new Error(`No registered group matching "${params.group}"`);
+
+    const config = this.registry[name];
+    const primaryFolder = config.folders[0];
+    const dir = this._memoryDir(primaryFolder);
+
+    if (!fs.existsSync(dir)) {
+      return { compacted: 0, decisions: 0, preferences: 0, rules: 0 };
+    }
+
+    // Read current conversation.md
+    const convPath = path.join(dir, 'conversation.md');
+    let convContent = '';
+    try { convContent = await fs.promises.readFile(convPath, 'utf-8'); } catch { /* empty */ }
+
+    if (!convContent.trim() || convContent.split(/^## /m).filter(s => s.trim()).length <= 1) {
+      return { compacted: 0, decisions: 0, preferences: 0, rules: 0 };
+    }
+
+    // Read existing buckets for deduplication context
+    const existingBuckets: Record<string, string> = {};
+    for (const bucket of ['decisions.md', 'preferences.md', 'rules.md']) {
+      try {
+        existingBuckets[bucket] = await fs.promises.readFile(path.join(dir, bucket), 'utf-8');
+      } catch {
+        existingBuckets[bucket] = '';
+      }
+    }
+
+    // Use the router to categorize — any LLM works
+    const compactPrompt = `You are a memory compaction system. Analyze the conversation history below and extract durable facts into three categories.
+
+EXISTING MEMORY (do not duplicate — update or skip if already captured):
+<decisions>
+${existingBuckets['decisions.md']}
+</decisions>
+<preferences>
+${existingBuckets['preferences.md']}
+</preferences>
+<rules>
+${existingBuckets['rules.md']}
+</rules>
+
+CONVERSATION HISTORY TO PROCESS:
+${convContent}
+
+INSTRUCTIONS:
+1. Extract NEW facts only — skip anything already in existing memory
+2. Update existing facts if the conversation contradicts or refines them
+3. Categorize each fact:
+   - DECISION: Something that was decided and acted upon (e.g., "Use GitHub OAuth, not Google")
+   - PREFERENCE: How the user likes things done (e.g., "Prefers terse responses")
+   - RULE: A constraint or guideline (e.g., "Never mock the database in tests")
+4. Ignore exploratory questions, casual chat, and clarification exchanges
+5. Each fact should be one line, starting with "- "
+
+Respond in EXACTLY this format (include all three sections even if empty):
+<decisions>
+- fact one
+- fact two
+</decisions>
+<preferences>
+- fact one
+</preferences>
+<rules>
+- fact one
+</rules>`;
+
+    const result = await this.router.run({
+      groupFolder: '_memory-compact',
+      prompt: compactPrompt,
+      agent: config.agent,
+    });
+
+    if (result.status !== 'success' || !result.output) {
+      throw new Error('Compaction failed: ' + (result.error || 'no output'));
+    }
+
+    // Parse the categorized output
+    const output = result.output;
+    const counts = { decisions: 0, preferences: 0, rules: 0 };
+
+    for (const [bucket, key] of [['decisions.md', 'decisions'], ['preferences.md', 'preferences'], ['rules.md', 'rules']] as const) {
+      const match = output.match(new RegExp(`<${key}>([\\s\\S]*?)</${key}>`));
+      if (!match) continue;
+
+      const newFacts = match[1].trim().split('\n').filter((l: string) => l.trim().startsWith('- '));
+      if (newFacts.length === 0) continue;
+
+      counts[key] = newFacts.length;
+
+      // Append new facts to the bucket file
+      const bucketPath = path.join(dir, bucket);
+      const existing = existingBuckets[bucket] || `# ${key.charAt(0).toUpperCase() + key.slice(1)}\n\n`;
+      const updated = existing.trimEnd() + '\n' + newFacts.join('\n') + '\n';
+      await fs.promises.writeFile(bucketPath, updated);
+    }
+
+    // Reset conversation.md — keep only the header
+    await fs.promises.writeFile(convPath, '# Conversation History\n\n');
+
+    const total = counts.decisions + counts.preferences + counts.rules;
+    this.emit({ type: 'compacted', group: name, folder: primaryFolder, ...counts, total });
+
+    return { compacted: total, ...counts };
+  }
+
+  /** Schedule memory compaction for all memory-enabled groups */
+  private async _scheduleCompaction(): Promise<void> {
+    const taskName = 'memory-compact-all';
+    const existing = await this.schedule.getByName(taskName).catch(() => null);
+    if (existing) return; // Already scheduled
+
+    await this.schedule.create({
+      name: taskName,
+      schedule: this.settings.compactCron,
+      method: '_compactAll',
+      params: {},
+    });
+  }
+
+  /** Internal: compact all memory-enabled groups (called by scheduler) */
+  async _compactAll(): Promise<void> {
+    for (const [name, config] of Object.entries(this.registry)) {
+      if (!config.memory) continue;
+      try {
+        await this.compact({ group: name });
+      } catch (err: any) {
+        this.emit({ type: 'compact_error', group: name, error: err.message });
+      }
+    }
+  }
 }
 
 // ─── Types ─────────────────────────────────────────────────────────
@@ -890,6 +1195,8 @@ interface GroupConfig {
   systemPrompt: string;
   /** Agent to use: 'claude' | 'gemini' | 'aider' | 'opencode' | 'auto' */
   agent: string;
+  /** Enable persistent memory system (conversation.md + bucketed .md files) */
+  memory?: boolean;
 }
 
 interface MessageEntry {
