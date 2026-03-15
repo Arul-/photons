@@ -81,9 +81,8 @@ export default class Claw extends Photon {
     if (savedSessions) this.sessionMap = savedSessions;
 
 
-    // Schedule memory compaction for memory-enabled groups
-    const hasMemoryGroups = Object.values(this.registry).some(c => c.memory);
-    if (hasMemoryGroups) {
+    // Schedule memory compaction
+    if (Object.keys(this.registry).length > 0) {
       this._scheduleCompaction().catch(() => {});
     }
 
@@ -231,7 +230,6 @@ export default class Claw extends Photon {
    * @param requiresTrigger Only route messages containing the trigger (default: true when trigger is non-empty)
    * @param systemPrompt System prompt prepended to every agent run for this group {@example "You are Lura, a concise personal assistant."}
    * @param agent Agent to use for this group ('claude'|'gemini'|'aider'|'opencode'|'auto') {@example "claude"}
-   * @param memory Enable persistent memory system for this group (conversation.md + bucketed .md files)
    */
   async register(params: {
     group: string;
@@ -240,7 +238,6 @@ export default class Claw extends Photon {
     requiresTrigger?: boolean;
     systemPrompt?: string;
     agent?: string;
-    memory?: boolean;
   }): Promise<{ name: string } & GroupConfig> {
     const waGroups = await this.whatsapp.groups();
     const query = params.group.toLowerCase();
@@ -261,7 +258,6 @@ export default class Claw extends Photon {
       allowedSenders: [],
       systemPrompt: params.systemPrompt ?? '',
       agent: params.agent ?? 'claude',
-      memory: params.memory ?? false,
     };
 
     this.registry[match.name] = config;
@@ -311,7 +307,6 @@ export default class Claw extends Photon {
    * @param requiresTrigger Override trigger requirement
    * @param systemPrompt System prompt for this group's agent {@example "You are Lura, a concise personal assistant."}
    * @param agent Switch to a different agent ('claude'|'gemini'|'aider'|'opencode'|'auto') {@example "gemini"}
-   * @param memory Enable or disable persistent memory for this group
    */
   async configure(params: {
     group: string;
@@ -320,7 +315,6 @@ export default class Claw extends Photon {
     requiresTrigger?: boolean;
     systemPrompt?: string;
     agent?: string;
-    memory?: boolean;
   }): Promise<{ name: string } & GroupConfig> {
     const query = params.group.toLowerCase();
     const name = Object.keys(this.registry).find(k => k.toLowerCase().includes(query));
@@ -338,7 +332,6 @@ export default class Claw extends Photon {
     if (params.folders !== undefined) config.folders = params.folders;
     if (params.systemPrompt !== undefined) config.systemPrompt = params.systemPrompt;
     if (params.agent !== undefined) config.agent = params.agent;
-    if (params.memory !== undefined) config.memory = params.memory;
 
     await this.memory.set('registry', this.registry);
 
@@ -616,11 +609,9 @@ export default class Claw extends Photon {
 
     // Build memory-augmented system prompt for scheduled runs
     let systemPrompt = config.systemPrompt || '';
-    if (config.memory) {
-      const memoryCtx = await this._buildMemoryPrompt(primaryFolder);
-      if (memoryCtx) {
-        systemPrompt = systemPrompt ? `${systemPrompt}\n\n${memoryCtx}` : memoryCtx;
-      }
+    const memoryCtx = await this._buildMemoryPrompt(primaryFolder);
+    if (memoryCtx) {
+      systemPrompt = systemPrompt ? `${systemPrompt}\n\n${memoryCtx}` : memoryCtx;
     }
 
     const result = await this.router.run({
@@ -639,9 +630,7 @@ export default class Claw extends Photon {
 
     if (result.status === 'success' && result.output) {
       // Append scheduled run to conversation log
-      if (config.memory) {
-        this._appendConversation(primaryFolder, `[Scheduled] ${prompt}`, result.output, 'System').catch(() => {});
-      }
+      this._appendConversation(primaryFolder, `[Scheduled] ${prompt}`, result.output, 'System').catch(() => {});
       await this._sendAgentResponse(groupName, result.output, primaryFolder, result.duration);
     }
   }
@@ -774,14 +763,12 @@ export default class Claw extends Photon {
     const sessionKey = `${config.agent}:${primaryFolder}`;
     const sessionId = this.sessionMap[sessionKey] ?? (config.agent === 'claude' ? this.sessionMap[primaryFolder] : undefined);
 
-    // Build memory-augmented system prompt if memory is enabled
+    // Build memory-augmented system prompt
     let systemPrompt = config.systemPrompt || '';
-    if (config.memory) {
-      this._ensureMemoryDir(primaryFolder);
-      const memoryCtx = await this._buildMemoryPrompt(primaryFolder);
-      if (memoryCtx) {
-        systemPrompt = systemPrompt ? `${systemPrompt}\n\n${memoryCtx}` : memoryCtx;
-      }
+    this._ensureMemoryDir(primaryFolder);
+    const memoryCtx = await this._buildMemoryPrompt(primaryFolder);
+    if (memoryCtx) {
+      systemPrompt = systemPrompt ? `${systemPrompt}\n\n${memoryCtx}` : memoryCtx;
     }
 
     let result: any;
@@ -807,11 +794,9 @@ export default class Claw extends Photon {
 
     if (result.status === 'success' && result.output) {
       // Append conversation round-trip to memory (non-blocking)
-      if (config.memory) {
-        this._appendConversation(primaryFolder, msg.content, result.output, msg.senderName).catch((err) => {
-          this.emit({ type: 'memory_error', group: name, error: err.message });
-        });
-      }
+      this._appendConversation(primaryFolder, msg.content, result.output, msg.senderName).catch((err) => {
+        this.emit({ type: 'memory_error', group: name, error: err.message });
+      });
       await this._sendAgentResponse(name, result.output, primaryFolder, result.duration, ackKey);
     } else if (result.error) {
       this.emit({ type: 'error', source: 'agent-runner', group: name, error: result.error });
@@ -1171,8 +1156,7 @@ Respond in EXACTLY this format (include all three sections even if empty):
 
   /** Internal: compact all memory-enabled groups (called by scheduler) */
   async _compactAll(): Promise<void> {
-    for (const [name, config] of Object.entries(this.registry)) {
-      if (!config.memory) continue;
+    for (const [name] of Object.entries(this.registry)) {
       try {
         await this.compact({ group: name });
       } catch (err: any) {
@@ -1195,8 +1179,6 @@ interface GroupConfig {
   systemPrompt: string;
   /** Agent to use: 'claude' | 'gemini' | 'aider' | 'opencode' | 'auto' */
   agent: string;
-  /** Enable persistent memory system (conversation.md + bucketed .md files) */
-  memory?: boolean;
 }
 
 interface MessageEntry {
