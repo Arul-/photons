@@ -30,10 +30,14 @@ export default class Courier extends Photon {
     retentionDays: 7,
   };
 
-  /** Active subscriptions keyed by subscriber ID */
+  /** Active subscriptions keyed by channel:group */
   private _subscriptions: Map<string, Subscription> = new Map();
   /** Timer handles for scheduled delivery */
   private _timers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+  /** Channel health: last message received timestamp */
+  private _channelHeartbeat: Map<string, number> = new Map();
+  /** Group name → resolved ID cache per channel */
+  private _resolvedGroups: Map<string, string> = new Map();
 
   private get inboxDir(): string {
     if (this._photonFilePath) return this.storage('inbox');
@@ -105,16 +109,19 @@ export default class Courier extends Photon {
     const ch = this._resolveChannel(channel);
     if (!ch) throw new Error(`Unknown channel: ${channel}. Available: telegram, whatsapp`);
 
-    const id = `${channel}:${group}`;
+    // Resolve group name → ID if needed
+    const resolvedGroup = await this._resolveGroup(channel, group);
+    const id = `${channel}:${resolvedGroup}`;
 
     // Remove existing subscription with same key
     if (this._subscriptions.has(id)) {
-      await this.unsubscribe({ channel, group });
+      await this.unsubscribe({ channel, group: resolvedGroup });
     }
 
     const sub: Subscription = {
       channel,
-      group,
+      group: resolvedGroup,
+      displayName: resolvedGroup !== group ? group : undefined,
       schedule,
       trigger,
       handler,
@@ -203,7 +210,8 @@ export default class Courier extends Photon {
       const filtered = this._filterForSubscriber(inbox, sub);
       const entry: any = {
         channel: sub.channel,
-        group: sub.group,
+        group: sub.displayName || sub.group,
+        groupId: sub.displayName ? sub.group : undefined,
         mode: sub.schedule ? 'scheduled' : 'realtime',
         schedule: sub.schedule,
         trigger: sub.trigger,
@@ -225,24 +233,39 @@ export default class Courier extends Photon {
    */
   async status(): Promise<{
     subscriptions: number;
-    channels: string[];
-    inboxSizes: Record<string, number>;
+    channels: Record<string, { status: string; lastActivity: string | null; inboxSize: number }>;
   }> {
-    const channels = new Set<string>();
-    for (const sub of this._subscriptions.values()) channels.add(sub.channel);
-    const inboxSizes: Record<string, number> = {};
-    for (const ch of channels) {
-      const p = this._inboxPathFor(ch);
+    const channelNames = new Set<string>();
+    for (const sub of this._subscriptions.values()) channelNames.add(sub.channel);
+
+    const channels: Record<string, { status: string; lastActivity: string | null; inboxSize: number }> = {};
+    for (const name of channelNames) {
+      const lastSeen = this._channelHeartbeat.get(name);
+      const ch = this._resolveChannel(name);
+      let chStatus = 'unknown';
+      if (ch) {
+        try {
+          const s = await ch.status();
+          chStatus = s.status || s.connected ? 'connected' : 'disconnected';
+        } catch { chStatus = 'unreachable'; }
+      }
+
+      let inboxSize = 0;
       try {
-        const lines = fs.readFileSync(p, 'utf-8').trim().split('\n').filter(Boolean);
-        inboxSizes[ch] = lines.length;
-      } catch { inboxSizes[ch] = 0; }
+        const p = this._inboxPathFor(name);
+        if (fs.existsSync(p)) {
+          inboxSize = fs.readFileSync(p, 'utf-8').trim().split('\n').filter(Boolean).length;
+        }
+      } catch { /* */ }
+
+      channels[name] = {
+        status: chStatus,
+        lastActivity: lastSeen ? new Date(lastSeen).toISOString() : null,
+        inboxSize,
+      };
     }
-    return {
-      subscriptions: this._subscriptions.size,
-      channels: [...channels],
-      inboxSizes,
-    };
+
+    return { subscriptions: this._subscriptions.size, channels };
   }
 
   // ─── Internal: Channel Subscription ────────────────────────────
@@ -251,6 +274,37 @@ export default class Courier extends Photon {
     if (name === 'telegram') return this.telegram;
     if (name === 'whatsapp') return this.whatsapp;
     return null;
+  }
+
+  /** Resolve a group name to its channel-specific ID (numeric for Telegram, JID for WhatsApp) */
+  private async _resolveGroup(channel: string, group: string): Promise<string> {
+    // Already a numeric ID or JID — use as-is
+    if (/^-?\d+$/.test(group) || group.includes('@')) return group;
+
+    // Check cache
+    const cacheKey = `${channel}:${group}`;
+    const cached = this._resolvedGroups.get(cacheKey);
+    if (cached) return cached;
+
+    // Ask the channel for its known groups
+    const ch = this._resolveChannel(channel);
+    if (!ch) return group;
+
+    try {
+      const groups: Array<{ chatId?: string; chatJid?: string; name: string }> = await ch.groups();
+      const query = group.toLowerCase();
+      for (const g of groups) {
+        const id = g.chatId || g.chatJid || '';
+        const name = (g.name || '').toLowerCase();
+        if (name === query || name.includes(query)) {
+          this._resolvedGroups.set(cacheKey, id);
+          return id;
+        }
+      }
+    } catch { /* channel might not be connected yet */ }
+
+    // Couldn't resolve — pass through as-is (channel's on() will do fuzzy match)
+    return group;
   }
 
   /** Subscribe to the underlying channel, routing messages to inbox */
@@ -266,6 +320,9 @@ export default class Courier extends Photon {
         message: data.message,
         receivedAt: Date.now(),
       };
+
+      // Track channel heartbeat
+      this._channelHeartbeat.set(sub.channel, Date.now());
 
       // Always persist to inbox (durable delivery guarantee)
       this._appendToInbox(sub.channel, entry);
@@ -461,8 +518,10 @@ export default class Courier extends Photon {
 
 interface Subscription {
   channel: string;
+  group: string;
+  /** Original name before resolution (e.g. "Personal Chat" → "-1003782122053") */
+  displayName?: string;
   schedule?: string;
-  group?: string;
   trigger?: string;
   handler?: (messages: InboxEntry[]) => void;
   createdAt: number;
