@@ -367,7 +367,7 @@
       telegram: null,
       runner: null,
       courier: null,
-      queue: { depth: 0, current: null },
+      queue: {},
       groups: [],
       health: null,
       selectedGroup: null,
@@ -448,12 +448,18 @@
 
       $('groupCountStat').textContent = state.groups.length;
 
-      // Queue depth indicator
-      const qDepth = state.queue?.depth || 0;
+      // Per-agent queue indicators
+      const queue = state.queue || {};
+      const qEntries = Object.entries(queue);
       const qStat = $('queueStat');
-      if (qDepth > 0) {
+      const totalActive = qEntries.reduce((sum, [, q]) => sum + (q.active || 0), 0);
+      const totalDepth = qEntries.reduce((sum, [, q]) => sum + (q.depth || 0), 0);
+      if (totalActive > 0 || totalDepth > 0) {
         qStat.style.display = '';
-        $('queueDepth').textContent = qDepth + (state.queue?.current ? ' (' + state.queue.current + ')' : '');
+        const parts = qEntries.map(([agent, q]) =>
+          agent + ':' + q.active + '/' + q.concurrency + (q.depth > 0 ? ' +' + q.depth : '')
+        );
+        $('queueDepth').textContent = parts.join(', ');
       } else {
         qStat.style.display = 'none';
       }
@@ -573,7 +579,7 @@
           state.telegram = data.telegram || null;
           state.runner = data.runner || null;
           state.courier = data.courier || null;
-          state.queue = data.queue || { depth: 0, current: null };
+          state.queue = data.queue || {};
           state.groups = data.groups || [];
           renderHeader();
           renderGroups();
@@ -681,7 +687,7 @@
           state.telegram = data.telegram || null;
           state.runner = data.runner || null;
           state.courier = data.courier || null;
-          state.queue = data.queue || { depth: 0, current: null };
+          state.queue = data.queue || {};
           state.groups = data.groups || [];
           renderHeader();
           renderGroups();

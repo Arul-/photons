@@ -35,11 +35,11 @@ export default class Claw extends Photon {
   // Message log per group name for context building
   private messageLog: Record<string, MessageEntry[]> = {};
 
-  // Processing queue — idle/wake loop
-  private _queue: QueueItem[] = [];
-  private _queueWake: (() => void) | null = null;
-  private _loopRunning = false;
-  private _currentItem: QueueItem | null = null;
+  // Per-agent processing queues with configurable concurrency
+  private _agentQueues: Map<string, QueueItem[]> = new Map();
+  private _agentWake: Map<string, (() => void)> = new Map();
+  private _agentActive: Map<string, number> = new Map();
+  private _agentLoops: Set<string> = new Set();   // which agents have a running loop
 
   constructor(
     private whatsapp: any,
@@ -63,6 +63,8 @@ export default class Claw extends Photon {
     maxConversations: 3,
     /** Cron schedule for memory compaction (default: 3am daily) */
     compactCron: '0 3 * * *',
+    /** Max concurrent tasks per agent type. Agents not listed default to 1. */
+    agentConcurrency: { claude: 2, gemini: 2, aider: 1, opencode: 1, auto: 1 } as Record<string, number>,
   };
 
   async onInitialize(ctx?: { reason?: string; oldInstance?: any }): Promise<void> {
@@ -74,20 +76,20 @@ export default class Claw extends Photon {
       this.registry = old.registry || {};
       this.messageLog = old.messageLog || {};
       this.handlers = old.handlers || new Map();
-      this._queue = old._queue || [];
-      this._loopRunning = old._loopRunning || false;
+      this._agentQueues = old._agentQueues || new Map();
 
       if (old.heartbeatTimer) {
         this.heartbeatTimer = old.heartbeatTimer;
         old.heartbeatTimer = null;
       }
 
-      // Stop old processing loop and restart ours
-      if (old._loopRunning) {
-        old._loopRunning = false;
-        if (old._queueWake) old._queueWake();
+      // Stop old processing loops and restart ours
+      for (const agent of (old._agentLoops || new Set())) {
+        old._agentLoops.delete(agent);
+        const wake = old._agentWake?.get(agent);
+        if (wake) wake();
       }
-      if (this.running) this._startProcessingLoop();
+      if (this.running) this._startAllLoops();
 
       old.handlers = null;
       this.emit({ type: 'hot_reload_transferred', running: this.running });
@@ -134,7 +136,7 @@ export default class Claw extends Photon {
   async onShutdown(ctx?: { reason?: string }): Promise<void> {
     if (ctx?.reason === 'hot-reload') return;
     this._unsubscribeAll();
-    this._stopProcessingLoop();
+    this._stopAllLoops();
     if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; }
     this.running = false;
   }
@@ -242,7 +244,7 @@ export default class Claw extends Photon {
     this.running = true;
     await this.memory.set('running', true);
 
-    this._startProcessingLoop();
+    this._startAllLoops();
     this._subscribeAll();
 
     // Drain pending messages that arrived while claw was stopped
@@ -277,7 +279,7 @@ export default class Claw extends Photon {
     }
 
     this._unsubscribeAll();
-    this._stopProcessingLoop();
+    this._stopAllLoops();
     if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; }
     this.running = false;
     await this.memory.set('running', false);
@@ -732,7 +734,7 @@ export default class Claw extends Photon {
     telegram: any;
     runner: any;
     courier: any;
-    queue: { depth: number; current: string | null };
+    queue: Record<string, { depth: number; active: number; concurrency: number }>;
     groups: Array<{ name: string } & GroupConfig>;
   }> {
     const safe = async (fn: () => Promise<any>, fallback: any = null) => {
@@ -752,10 +754,7 @@ export default class Claw extends Photon {
       telegram: telegramStatus,
       runner: runnerStatus,
       courier: courierStatus,
-      queue: {
-        depth: this._queue.length,
-        current: this._currentItem?.groupName ?? null,
-      },
+      queue: this._getQueueStatus(),
       groups: Object.entries(this.registry).map(([name, cfg]) => ({ name, ...cfg })),
     };
   }
@@ -927,54 +926,121 @@ export default class Claw extends Photon {
     }
   }
 
-  // ─── Processing Loop ───────────────────────────────────────────
+  // ─── Per-Agent Processing Queues ────────────────────────────────
 
   private _enqueue(item: QueueItem): void {
-    this._queue.push(item);
-    if (this._queueWake) {
-      this._queueWake();
-      this._queueWake = null;
+    const agent = item.config.agent || 'claude';
+    if (!this._agentQueues.has(agent)) this._agentQueues.set(agent, []);
+    this._agentQueues.get(agent)!.push(item);
+
+    // Ensure this agent has a running loop
+    this._ensureAgentLoop(agent);
+
+    // Wake the loop if it's idle
+    const wake = this._agentWake.get(agent);
+    if (wake) {
+      this._agentWake.delete(agent);
+      wake();
     }
   }
 
-  private _startProcessingLoop(): void {
-    if (this._loopRunning) return;
-    this._loopRunning = true;
+  /** Start loops for all known agent types in the registry */
+  private _startAllLoops(): void {
+    const agents = new Set<string>();
+    for (const config of Object.values(this.registry)) {
+      agents.add(config.agent || 'claude');
+    }
+    // Always ensure at least the default agents
+    agents.add('claude');
+    for (const agent of agents) {
+      this._ensureAgentLoop(agent);
+    }
+  }
+
+  /** Stop all agent loops */
+  private _stopAllLoops(): void {
+    for (const agent of [...this._agentLoops]) {
+      this._agentLoops.delete(agent);
+      const wake = this._agentWake.get(agent);
+      if (wake) {
+        this._agentWake.delete(agent);
+        wake();
+      }
+    }
+  }
+
+  /** Ensure a processing loop is running for the given agent */
+  private _ensureAgentLoop(agent: string): void {
+    if (this._agentLoops.has(agent)) return;
+    this._agentLoops.add(agent);
+    if (!this._agentActive.has(agent)) this._agentActive.set(agent, 0);
+
+    const maxConcurrency = this.settings.agentConcurrency[agent] ?? 1;
 
     const loop = async () => {
-      while (this._loopRunning) {
-        if (this._queue.length === 0) {
-          // Idle — wait for wake signal
-          await new Promise<void>(resolve => { this._queueWake = resolve; });
-          if (!this._loopRunning) break;
+      while (this._agentLoops.has(agent)) {
+        const queue = this._agentQueues.get(agent);
+
+        // Wait if queue is empty or we're at max concurrency
+        if (!queue || queue.length === 0 || (this._agentActive.get(agent) || 0) >= maxConcurrency) {
+          await new Promise<void>(resolve => { this._agentWake.set(agent, resolve); });
+          if (!this._agentLoops.has(agent)) break;
+          continue;
         }
 
-        const item = this._queue.shift();
-        if (!item) continue;
+        // Dispatch up to (maxConcurrency - active) items concurrently
+        const active = this._agentActive.get(agent) || 0;
+        const slotsAvailable = maxConcurrency - active;
+        const toDispatch = queue.splice(0, slotsAvailable);
 
-        this._currentItem = item;
-        try {
-          if (item.batch && item.batch.length > 0) {
-            await this._handleBatch(item.groupName, item.config, item.batch);
-          } else if (item.event) {
-            await this._handleMessage(item.groupName, item.config, item.event);
-          }
-        } catch (err: any) {
-          this.emit({ type: 'handle_error', group: item.groupName, error: err.message });
+        for (const item of toDispatch) {
+          this._agentActive.set(agent, (this._agentActive.get(agent) || 0) + 1);
+          this._processItem(agent, item);  // fire-and-forget, managed by active count
         }
-        this._currentItem = null;
       }
     };
 
-    loop().catch(() => { this._loopRunning = false; });
+    loop().catch(() => { this._agentLoops.delete(agent); });
   }
 
-  private _stopProcessingLoop(): void {
-    this._loopRunning = false;
-    if (this._queueWake) {
-      this._queueWake();
-      this._queueWake = null;
+  /** Process a single queue item, decrementing active count and waking the loop when done */
+  private async _processItem(agent: string, item: QueueItem): Promise<void> {
+    try {
+      if (item.batch && item.batch.length > 0) {
+        await this._handleBatch(item.groupName, item.config, item.batch);
+      } else if (item.event) {
+        await this._handleMessage(item.groupName, item.config, item.event);
+      }
+    } catch (err: any) {
+      this.emit({ type: 'handle_error', group: item.groupName, error: err.message });
+    } finally {
+      const current = this._agentActive.get(agent) || 1;
+      this._agentActive.set(agent, current - 1);
+
+      // Wake the loop so it can dispatch more items
+      const wake = this._agentWake.get(agent);
+      if (wake) {
+        this._agentWake.delete(agent);
+        wake();
+      }
     }
+  }
+
+  private _getQueueStatus(): Record<string, { depth: number; active: number; concurrency: number }> {
+    const result: Record<string, { depth: number; active: number; concurrency: number }> = {};
+    const agents = new Set([...this._agentQueues.keys(), ...this._agentActive.keys()]);
+    for (const agent of agents) {
+      const depth = this._agentQueues.get(agent)?.length || 0;
+      const active = this._agentActive.get(agent) || 0;
+      if (depth > 0 || active > 0) {
+        result[agent] = {
+          depth,
+          active,
+          concurrency: this.settings.agentConcurrency[agent] ?? 1,
+        };
+      }
+    }
+    return result;
   }
 
   /** Handle a batch of messages from courier scheduled delivery */
@@ -1200,9 +1266,11 @@ export default class Claw extends Photon {
       delete this.messageLog[oldName];
     }
 
-    // Update queued items
-    for (const item of this._queue) {
-      if (item.groupName === oldName) item.groupName = newName;
+    // Update queued items across all agent queues
+    for (const queue of this._agentQueues.values()) {
+      for (const item of queue) {
+        if (item.groupName === oldName) item.groupName = newName;
+      }
     }
 
     // Re-subscribe through courier if scheduled
