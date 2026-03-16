@@ -655,6 +655,45 @@ export default class Claw extends Photon {
   }
 
   /**
+   * Inject a synthetic message into the pipeline for E2E testing.
+   * The message goes through the full processing queue and the agent
+   * response is sent back through the actual channel — testing everything
+   * except the channel listener itself.
+   *
+   * @title Inject Test Message
+   * @openWorld
+   * @param group Group or chat name (partial match) {@example "Arul"}
+   * @param message The message text to inject {@example "Summarise today's activity"}
+   * @param sender Simulated sender name {@example "Arul"}
+   */
+  async inject(params: { group: string; message: string; sender?: string }): Promise<{ status: string; group: string; queued: boolean }> {
+    const query = params.group.toLowerCase();
+    const name = Object.keys(this.registry).find(k => k.toLowerCase().includes(query));
+    if (!name) throw new Error(`No registered group matching "${params.group}"`);
+
+    const config = this.registry[name];
+    const now = new Date();
+
+    const syntheticEvent = {
+      chatId: name,
+      chatJid: name,
+      message: {
+        sender: params.sender || 'test-user',
+        senderName: params.sender || 'Test User',
+        content: params.message,
+        fromMe: false,
+        timestamp: now.toISOString(),
+        type: 'text',
+      },
+    };
+
+    this._enqueue({ groupName: name, config, event: syntheticEvent });
+
+    this.emit({ type: 'injected', group: name, message: params.message.slice(0, 80) });
+    return { status: 'queued', group: name, queued: true };
+  }
+
+  /**
    * List available groups from all connected channels.
    *
    * @title List Groups
