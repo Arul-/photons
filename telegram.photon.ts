@@ -47,9 +47,8 @@ export default class Telegram extends Photon {
   private _eventListeners: Array<{
     event: string;
     fn: (data: any) => void;
-    filter?: { group?: string; chatId?: string; trigger?: string; fromMe?: boolean; schedule?: string };
+    filter?: { group?: string; chatId?: string; trigger?: string; fromMe?: boolean };
     resolvedChatId?: string;
-    _timer?: ReturnType<typeof setInterval>;
   }> = [];
   private knownChats: Record<string, string> = {}; // chatId → name
   private _chatNameIndex: Map<string, string> = new Map(); // lowercase name → chatId
@@ -71,6 +70,7 @@ export default class Telegram extends Photon {
   private get offsetPath(): string {
     return path.join(this.authDir, 'offset.json');
   }
+
 
   // ─── Lifecycle Hooks ──────────────────────────────────────────
 
@@ -103,20 +103,6 @@ export default class Telegram extends Photon {
         this._pollLoop();
       }
 
-      // Re-create scheduled timers (timer handles can't transfer across instances)
-      for (const entry of old._eventListeners || []) {
-        if (entry._timer) clearInterval(entry._timer);
-      }
-      for (const entry of this._eventListeners) {
-        if (entry.filter?.schedule) {
-          const intervalMs = _parseSchedule(entry.filter.schedule);
-          entry._timer = setInterval(() => {
-            if (!this._connected || this._polling) return;
-            this._fetchOnce().catch(() => {});
-          }, intervalMs);
-        }
-      }
-
       this.emit({ type: 'hot_reload_transferred' });
       return;
     }
@@ -140,10 +126,6 @@ export default class Telegram extends Photon {
     if (ctx?.reason === 'hot-reload') return; // preserve state for new instance
     this._deactivatePolling();
     this._connected = false;
-    // Clear all scheduled timers
-    for (const entry of this._eventListeners) {
-      if (entry._timer) clearInterval(entry._timer);
-    }
   }
 
   // ─── Connection ───────────────────────────────────────────────
@@ -200,8 +182,8 @@ export default class Telegram extends Photon {
       this._offset = this._loadPersistedOffset();
     }
 
-    // Activate polling if real-time subscribers are already waiting
-    if (this._hasRealtimeSubscribers()) {
+    // Activate polling if subscribers are already waiting
+    if (this._hasSubscribers()) {
       this._activatePolling();
     }
 
@@ -236,7 +218,7 @@ export default class Telegram extends Photon {
     polling: string;
     username: string;
     subscribers: number;
-    queuedMessages: number;
+    queuedOutgoing: number;
     reconnectAttempts: number;
   }> {
     return {
@@ -244,7 +226,7 @@ export default class Telegram extends Photon {
       polling: this._polling ? 'active' : 'idle',
       username: this._botUsername,
       subscribers: this._eventListeners.filter(e => e.event === 'message').length,
-      queuedMessages: this.outgoingQueue.length,
+      queuedOutgoing: this.outgoingQueue.length,
       reconnectAttempts: this._reconnectAttempts,
     };
   }
@@ -397,20 +379,14 @@ export default class Telegram extends Photon {
 
   /**
    * Return and clear buffered inbound messages.
-   * If polling is idle (no real-time subscribers), does a one-shot fetch from Telegram.
+   * If polling is idle (no subscribers), does a one-shot fetch from Telegram first.
    *
    * @title Pending Messages
    * @closedWorld
    * @format json
    */
   async pending(): Promise<Array<{ chatId: string; message: InboundMessage }>> {
-    // If polling is active, just drain the buffer
-    if (this._polling) {
-      return this._pendingMessages.splice(0);
-    }
-
-    // One-shot fetch — grab whatever Telegram has queued
-    if (this._connected) {
+    if (!this._polling && this._connected) {
       await this._fetchOnce();
     }
     return this._pendingMessages.splice(0);
@@ -418,21 +394,20 @@ export default class Telegram extends Photon {
 
   /**
    * Subscribe to events with optional filtering.
-   * Activates long-polling when the first real-time subscriber registers.
-   * Use `schedule` for periodic fetches instead of real-time polling.
+   * Activates long-polling when the first subscriber registers.
    * @internal
    *
    * @example
-   * // Real-time — activates long-polling
+   * // All messages — activates long-polling
    * telegram.on('message', handler)
    *
-   * // Specific group with trigger (real-time)
+   * // Specific group with trigger
    * telegram.on('message', handler, { group: 'My Group', trigger: '@' })
    *
-   * // Periodic fetch — checks every hour, no persistent connection
-   * telegram.on('message', handler, { schedule: '@hourly' })
+   * // By chat ID directly
+   * telegram.on('message', handler, { chatId: '-1001234567890' })
    */
-  on(event: string, fn: (data: any) => void, filter?: { group?: string; chatId?: string; trigger?: string; fromMe?: boolean; schedule?: string }): void {
+  on(event: string, fn: (data: any) => void, filter?: { group?: string; chatId?: string; trigger?: string; fromMe?: boolean }): void {
     const entry: typeof this._eventListeners[0] = { event, fn, filter };
 
     // Resolve group name → chatId eagerly if chats are already known
@@ -454,47 +429,28 @@ export default class Telegram extends Photon {
         ((filter.chatId && e.filter?.chatId === filter.chatId) ||
          (filter.group && e.filter?.group === filter.group))
       );
-      if (idx !== -1) {
-        // Clear timer if the old entry had one
-        if (this._eventListeners[idx]._timer) clearInterval(this._eventListeners[idx]._timer);
-        this._eventListeners.splice(idx, 1);
-      }
-    }
-
-    // Set up scheduled fetch if requested
-    if (filter?.schedule) {
-      const intervalMs = _parseSchedule(filter.schedule);
-      entry._timer = setInterval(() => {
-        // Skip if disconnected or if real-time polling already covers delivery
-        if (!this._connected || this._polling) return;
-        this._fetchOnce().catch(() => {});
-      }, intervalMs);
-      // Also do an immediate fetch (only if polling isn't active)
-      if (this._connected && !this._polling) this._fetchOnce().catch(() => {});
+      if (idx !== -1) this._eventListeners.splice(idx, 1);
     }
 
     this._eventListeners.push(entry);
 
-    // Activate real-time polling if this is a real-time subscriber and we're connected
-    if (!filter?.schedule && this._connected && !this._polling) {
+    // Activate polling if this is the first subscriber and we're connected
+    if (this._connected && !this._polling) {
       this._activatePolling();
     }
   }
 
   /**
    * Unsubscribe from events.
-   * Deactivates polling when the last real-time subscriber leaves.
+   * Deactivates polling when the last subscriber leaves.
    * @internal
    */
   off(event: string, fn: (data: any) => void): void {
     const idx = this._eventListeners.findIndex(e => e.event === event && e.fn === fn);
-    if (idx !== -1) {
-      if (this._eventListeners[idx]._timer) clearInterval(this._eventListeners[idx]._timer);
-      this._eventListeners.splice(idx, 1);
-    }
+    if (idx !== -1) this._eventListeners.splice(idx, 1);
 
-    // Deactivate polling if no real-time subscribers remain
-    if (this._polling && !this._hasRealtimeSubscribers()) {
+    // Deactivate polling if no subscribers remain
+    if (this._polling && !this._hasSubscribers()) {
       this._deactivatePolling();
     }
   }
@@ -567,9 +523,9 @@ export default class Telegram extends Photon {
 
   // ─── Polling Control ─────────────────────────────────────────
 
-  /** Check if any real-time (non-scheduled) subscribers exist */
-  private _hasRealtimeSubscribers(): boolean {
-    return this._eventListeners.some(e => e.event === 'message' && !e.filter?.schedule);
+  /** Check if any message subscribers exist */
+  private _hasSubscribers(): boolean {
+    return this._eventListeners.some(e => e.event === 'message');
   }
 
   /** Start long-polling (demand-driven — called when first real-time subscriber registers) */
@@ -1066,28 +1022,3 @@ function _escHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/** Parse schedule shorthand to milliseconds */
-function _parseSchedule(schedule: string): number {
-  const shorthands: Record<string, number> = {
-    '@minutely': 60_000,
-    '@5m': 5 * 60_000,
-    '@15m': 15 * 60_000,
-    '@30m': 30 * 60_000,
-    '@hourly': 60 * 60_000,
-    '@daily': 24 * 60 * 60_000,
-  };
-  if (shorthands[schedule]) return shorthands[schedule];
-
-  // Parse "5m", "1h", "30s" etc.
-  const match = schedule.match(/^(\d+)(s|m|h)$/);
-  if (match) {
-    const n = parseInt(match[1], 10);
-    const unit = match[2];
-    if (unit === 's') return n * 1000;
-    if (unit === 'm') return n * 60_000;
-    if (unit === 'h') return n * 60 * 60_000;
-  }
-
-  // Default: 1 hour
-  return 60 * 60_000;
-}
