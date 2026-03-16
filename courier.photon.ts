@@ -36,8 +36,6 @@ export default class Courier extends Photon {
   private _timers: Map<string, ReturnType<typeof setTimeout>> = new Map();
   /** Channel health: last message received timestamp */
   private _channelHeartbeat: Map<string, number> = new Map();
-  /** Group name → resolved ID cache per channel */
-  private _resolvedGroups: Map<string, string> = new Map();
 
   private get inboxDir(): string {
     if (this._photonFilePath) return this.storage('inbox');
@@ -96,6 +94,7 @@ export default class Courier extends Photon {
    * @param group Group name or chat ID
    * @param schedule Delivery schedule (omit for real-time) {@choice @5m, @15m, @30m, @hourly, @daily}
    * @param trigger Trigger substring filter
+   * @param ack Auto-acknowledgment message for scheduled groups (use {time} for next delivery time)
    * @param handler Callback for message delivery
    */
   async subscribe(params: {
@@ -103,27 +102,26 @@ export default class Courier extends Photon {
     group: string;
     schedule?: string;
     trigger?: string;
+    ack?: string;
     handler?: (messages: InboxEntry[]) => void;
   }): Promise<{ status: string; mode: string; nextDelivery?: string }> {
-    const { channel, group, schedule, trigger, handler } = params;
+    const { channel, group, schedule, trigger, ack, handler } = params;
     const ch = this._resolveChannel(channel);
     if (!ch) throw new Error(`Unknown channel: ${channel}. Available: telegram, whatsapp`);
 
-    // Resolve group name → ID if needed
-    const resolvedGroup = await this._resolveGroup(channel, group);
-    const id = `${channel}:${resolvedGroup}`;
+    const id = `${channel}:${group}`;
 
     // Remove existing subscription with same key
     if (this._subscriptions.has(id)) {
-      await this.unsubscribe({ channel, group: resolvedGroup });
+      await this.unsubscribe({ channel, group });
     }
 
     const sub: Subscription = {
       channel,
-      group: resolvedGroup,
-      displayName: resolvedGroup !== group ? group : undefined,
+      group,
       schedule,
       trigger,
+      ack,
       handler,
       createdAt: Date.now(),
     };
@@ -210,8 +208,7 @@ export default class Courier extends Photon {
       const filtered = this._filterForSubscriber(inbox, sub);
       const entry: any = {
         channel: sub.channel,
-        group: sub.displayName || sub.group,
-        groupId: sub.displayName ? sub.group : undefined,
+        group: sub.group,
         mode: sub.schedule ? 'scheduled' : 'realtime',
         schedule: sub.schedule,
         trigger: sub.trigger,
@@ -276,36 +273,6 @@ export default class Courier extends Photon {
     return null;
   }
 
-  /** Resolve a group name to its channel-specific ID (numeric for Telegram, JID for WhatsApp) */
-  private async _resolveGroup(channel: string, group: string): Promise<string> {
-    // Already a numeric ID or JID — use as-is
-    if (/^-?\d+$/.test(group) || group.includes('@')) return group;
-
-    // Check cache
-    const cacheKey = `${channel}:${group}`;
-    const cached = this._resolvedGroups.get(cacheKey);
-    if (cached) return cached;
-
-    // Ask the channel for its known groups
-    const ch = this._resolveChannel(channel);
-    if (!ch) return group;
-
-    try {
-      const groups: Array<{ chatId?: string; chatJid?: string; name: string }> = await ch.groups();
-      const query = group.toLowerCase();
-      for (const g of groups) {
-        const id = g.chatId || g.chatJid || '';
-        const name = (g.name || '').toLowerCase();
-        if (name === query || name.includes(query)) {
-          this._resolvedGroups.set(cacheKey, id);
-          return id;
-        }
-      }
-    } catch { /* channel might not be connected yet */ }
-
-    // Couldn't resolve — pass through as-is (channel's on() will do fuzzy match)
-    return group;
-  }
 
   /** Subscribe to the underlying channel, routing messages to inbox */
   private _registerChannelListener(id: string, sub: Subscription): void {
@@ -327,8 +294,16 @@ export default class Courier extends Photon {
       // Always persist to inbox (durable delivery guarantee)
       this._appendToInbox(sub.channel, entry);
 
-      // Real-time mode: deliver immediately + advance cursor
-      if (!sub.schedule && sub.handler) {
+      if (sub.schedule) {
+        // Scheduled mode: auto-ack if configured
+        if (sub.ack && !entry.message.fromMe) {
+          const nextMs = _nextAlignedTime(_parseSchedule(sub.schedule));
+          const timeStr = _formatRelativeTime(nextMs);
+          const ackText = sub.ack.replace('{time}', timeStr);
+          this._sendAck(sub.channel, chatId, ackText, entry.message.messageId);
+        }
+      } else if (sub.handler) {
+        // Real-time mode: deliver immediately + advance cursor
         sub.handler([entry]);
         this._advanceCursor(id, entry.receivedAt);
       }
@@ -342,6 +317,19 @@ export default class Courier extends Photon {
 
     // Store cleanup function
     sub._channelOff = () => ch.off('message', handler);
+  }
+
+  /** Send an auto-acknowledgment back through the channel */
+  private _sendAck(channel: string, chatId: string, text: string, replyToId?: string): void {
+    const ch = this._resolveChannel(channel);
+    if (!ch) return;
+    // Use reply if possible, fall back to send
+    const sendFn = replyToId && ch.reply
+      ? () => ch.reply({ chat: chatId, text, messageId: Number(replyToId) })
+      : () => ch.send({ chat: chatId, text });
+    sendFn().catch(() => {
+      // Non-fatal — ack is best-effort
+    });
   }
 
   // ─── Internal: Persistent Inbox ────────────────────────────────
@@ -519,13 +507,12 @@ export default class Courier extends Photon {
 interface Subscription {
   channel: string;
   group: string;
-  /** Original name before resolution (e.g. "Personal Chat" → "-1003782122053") */
-  displayName?: string;
   schedule?: string;
   trigger?: string;
+  /** Auto-ack message template (use {time} for next delivery) */
+  ack?: string;
   handler?: (messages: InboxEntry[]) => void;
   createdAt: number;
-  /** Cleanup function to unsubscribe from channel */
   _channelOff?: () => void;
 }
 
@@ -568,4 +555,21 @@ function _nextAlignedTime(intervalMs: number): number {
   const elapsed = now - midnight;
   const intervals = Math.ceil(elapsed / intervalMs);
   return midnight + intervals * intervalMs;
+}
+
+/** Format a future timestamp as a human-readable relative/absolute time */
+function _formatRelativeTime(ms: number): string {
+  const diff = ms - Date.now();
+  if (diff < 60_000) return 'in less than a minute';
+  if (diff < 60 * 60_000) {
+    const mins = Math.round(diff / 60_000);
+    return `in ${mins} minute${mins === 1 ? '' : 's'}`;
+  }
+  // Show clock time for longer durations
+  const d = new Date(ms);
+  const h = d.getHours();
+  const m = d.getMinutes();
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 || 12;
+  return `at ${h12}:${String(m).padStart(2, '0')} ${ampm}`;
 }
