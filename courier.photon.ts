@@ -85,35 +85,37 @@ export default class Courier extends Photon {
    * schedule, they're delivered immediately but still persisted —
    * use drain() after restart to catch up on missed messages.
    *
+   * The subscription key is derived from channel + group automatically.
+   *
    * @title Subscribe
    * @param channel Channel name {@choice telegram, whatsapp}
-   * @param id Unique subscriber ID (e.g. "claw:personal-chat")
+   * @param group Group name or chat ID
    * @param schedule Delivery schedule (omit for real-time) {@choice @5m, @15m, @30m, @hourly, @daily}
-   * @param group Group name or chat ID to filter
    * @param trigger Trigger substring filter
-   * @param handler Callback for message delivery (scheduled mode delivers batches, real-time delivers singles)
+   * @param handler Callback for message delivery
    */
   async subscribe(params: {
     channel: string;
-    id: string;
+    group: string;
     schedule?: string;
-    group?: string;
     trigger?: string;
     handler?: (messages: InboxEntry[]) => void;
   }): Promise<{ status: string; mode: string; nextDelivery?: string }> {
-    const { channel, id, schedule, group, trigger, handler } = params;
+    const { channel, group, schedule, trigger, handler } = params;
     const ch = this._resolveChannel(channel);
     if (!ch) throw new Error(`Unknown channel: ${channel}. Available: telegram, whatsapp`);
 
-    // Remove existing subscription with same ID
+    const id = `${channel}:${group}`;
+
+    // Remove existing subscription with same key
     if (this._subscriptions.has(id)) {
-      await this.unsubscribe({ id });
+      await this.unsubscribe({ channel, group });
     }
 
     const sub: Subscription = {
       channel,
-      schedule,
       group,
+      schedule,
       trigger,
       handler,
       createdAt: Date.now(),
@@ -142,36 +144,40 @@ export default class Courier extends Photon {
    * Remove a subscription and stop scheduled delivery.
    *
    * @title Unsubscribe
-   * @param id Subscriber ID to remove
+   * @param channel Channel name {@choice telegram, whatsapp}
+   * @param group Group name or chat ID
    */
-  async unsubscribe(params: { id: string }): Promise<void> {
-    const sub = this._subscriptions.get(params.id);
+  async unsubscribe(params: { channel: string; group: string }): Promise<void> {
+    const id = `${params.channel}:${params.group}`;
+    const sub = this._subscriptions.get(id);
     if (!sub) return;
 
     // Stop timer
-    const timer = this._timers.get(params.id);
+    const timer = this._timers.get(id);
     if (timer) clearTimeout(timer);
-    this._timers.delete(params.id);
+    this._timers.delete(id);
 
     // Unsubscribe from channel
     if (sub._channelOff) sub._channelOff();
 
-    this._subscriptions.delete(params.id);
+    this._subscriptions.delete(id);
   }
 
   /**
-   * Read pending messages for a subscriber without waiting for the schedule.
+   * Read pending messages for a group without waiting for the schedule.
    * Advances the cursor — messages won't be delivered again.
    *
    * @title Drain
    * @readOnly
-   * @param id Subscriber ID
+   * @param channel Channel name {@choice telegram, whatsapp}
+   * @param group Group name or chat ID
    * @format json
    */
-  async drain(params: { id: string }): Promise<Array<InboxEntry>> {
-    const sub = this._subscriptions.get(params.id);
+  async drain(params: { channel: string; group: string }): Promise<Array<InboxEntry>> {
+    const id = `${params.channel}:${params.group}`;
+    const sub = this._subscriptions.get(id);
     if (!sub) return [];
-    return this._deliverBatch(params.id, sub);
+    return this._deliverBatch(id, sub);
   }
 
   /**
@@ -182,11 +188,10 @@ export default class Courier extends Photon {
    * @format table
    */
   async subscriptions(): Promise<Array<{
-    id: string;
     channel: string;
+    group: string;
     mode: string;
     schedule?: string;
-    group?: string;
     trigger?: string;
     inboxCount: number;
     nextDelivery?: string;
@@ -197,11 +202,10 @@ export default class Courier extends Photon {
       const inbox = this._readInboxFrom(sub.channel, cursor);
       const filtered = this._filterForSubscriber(inbox, sub);
       const entry: any = {
-        id,
         channel: sub.channel,
+        group: sub.group,
         mode: sub.schedule ? 'scheduled' : 'realtime',
         schedule: sub.schedule,
-        group: sub.group,
         trigger: sub.trigger,
         inboxCount: filtered.length,
       };
