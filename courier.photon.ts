@@ -34,8 +34,6 @@ export default class Courier extends Photon {
   private _subscriptions: Map<string, Subscription> = new Map();
   /** Timer handles for scheduled delivery */
   private _timers: Map<string, ReturnType<typeof setTimeout>> = new Map();
-  /** Channel health: last message received timestamp */
-  private _channelHeartbeat: Map<string, number> = new Map();
 
   private get inboxDir(): string {
     if (this._photonFilePath) return this.storage('inbox');
@@ -230,39 +228,20 @@ export default class Courier extends Photon {
    */
   async status(): Promise<{
     subscriptions: number;
-    channels: Record<string, { status: string; lastActivity: string | null; inboxSize: number }>;
+    inboxSizes: Record<string, number>;
   }> {
-    const channelNames = new Set<string>();
-    for (const sub of this._subscriptions.values()) channelNames.add(sub.channel);
-
-    const channels: Record<string, { status: string; lastActivity: string | null; inboxSize: number }> = {};
-    for (const name of channelNames) {
-      const lastSeen = this._channelHeartbeat.get(name);
-      const ch = this._resolveChannel(name);
-      let chStatus = 'unknown';
-      if (ch) {
-        try {
-          const s = await ch.status();
-          chStatus = s.status || s.connected ? 'connected' : 'disconnected';
-        } catch { chStatus = 'unreachable'; }
-      }
-
-      let inboxSize = 0;
+    const channels = new Set<string>();
+    for (const sub of this._subscriptions.values()) channels.add(sub.channel);
+    const inboxSizes: Record<string, number> = {};
+    for (const ch of channels) {
       try {
-        const p = this._inboxPathFor(name);
+        const p = this._inboxPathFor(ch);
         if (fs.existsSync(p)) {
-          inboxSize = fs.readFileSync(p, 'utf-8').trim().split('\n').filter(Boolean).length;
-        }
-      } catch { /* */ }
-
-      channels[name] = {
-        status: chStatus,
-        lastActivity: lastSeen ? new Date(lastSeen).toISOString() : null,
-        inboxSize,
-      };
+          inboxSizes[ch] = fs.readFileSync(p, 'utf-8').trim().split('\n').filter(Boolean).length;
+        } else { inboxSizes[ch] = 0; }
+      } catch { inboxSizes[ch] = 0; }
     }
-
-    return { subscriptions: this._subscriptions.size, channels };
+    return { subscriptions: this._subscriptions.size, inboxSizes };
   }
 
   // ─── Internal: Channel Subscription ────────────────────────────
@@ -287,9 +266,6 @@ export default class Courier extends Photon {
         message: data.message,
         receivedAt: Date.now(),
       };
-
-      // Track channel heartbeat
-      this._channelHeartbeat.set(sub.channel, Date.now());
 
       // Always persist to inbox (durable delivery guarantee)
       this._appendToInbox(sub.channel, entry);
