@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="mcp:ui-size" content="minWidth=900;minHeight=500;maxHeight=900">
+  <meta name="mcp:ui-size" content="minWidth=960;minHeight=500;maxHeight=900">
   <title>Claw Pipeline</title>
   <style>
     :root {
@@ -29,7 +29,6 @@
       --orange: #f97316;
       --orange-dim: rgba(249, 115, 22, 0.15);
     }
-
     :root.light {
       --bg-primary: #f4f4f5;
       --bg-secondary: #fafafa;
@@ -61,49 +60,38 @@
 
     /* ── Header ── */
     .header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 12px 16px;
-      border-bottom: 1px solid var(--border-color);
-      background: var(--bg-secondary);
-      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 16px; border-bottom: 1px solid var(--border-color);
+      background: var(--bg-secondary); flex-shrink: 0;
     }
-
     .header-left { display: flex; align-items: center; gap: 12px; }
-
-    .header h1 { font-size: 18px; font-weight: 600; }
+    .header h1 { font-size: 16px; font-weight: 600; }
 
     .pipeline-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 10px;
-      border-radius: 20px;
-      font-size: 12px;
-      font-weight: 600;
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
     }
-
     .pipeline-badge.running { background: var(--green-dim); color: var(--green); }
     .pipeline-badge.stopped { background: var(--accent-dim); color: var(--accent); }
-
-    .pipeline-dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      background: currentColor;
-    }
-
+    .pipeline-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
     .pipeline-badge.running .pipeline-dot { animation: pulse 2s ease-in-out infinite; }
-
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
-    .header-actions { display: flex; gap: 8px; }
+    .header-stats {
+      display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary);
+    }
+    .header-stats .stat { display: flex; align-items: center; gap: 5px; }
+    .header-stats .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .header-stats .value { font-weight: 600; color: var(--text-primary); }
+
+    .header-actions { display: flex; gap: 6px; }
 
     .btn {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 6px 14px; border-radius: 6px; font-size: 13px;
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 5px 12px; border-radius: 6px; font-size: 12px;
       font-weight: 500; border: 1px solid var(--border-color);
       background: var(--bg-tertiary); color: var(--text-primary);
-      cursor: pointer; transition: all 0.15s ease;
+      cursor: pointer; transition: all 0.15s ease; white-space: nowrap;
     }
     .btn:hover { background: var(--border-color); }
     .btn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -113,57 +101,57 @@
     .btn-start:hover { background: #0ea472; }
     .btn-stop { background: var(--accent-dim); color: var(--accent); border-color: transparent; }
     .btn-stop:hover { background: var(--accent); color: #fff; }
-    .btn-sm { padding: 4px 10px; font-size: 12px; }
-    .btn-icon { padding: 6px 8px; font-size: 16px; line-height: 1; }
+    .btn-sm { padding: 3px 8px; font-size: 11px; }
+    .btn-ghost { background: transparent; border-color: transparent; }
+    .btn-ghost:hover { background: var(--bg-tertiary); }
+    .btn-icon { padding: 5px 7px; font-size: 14px; line-height: 1; }
+    .btn-danger { color: var(--accent); }
+    .btn-danger:hover { background: var(--accent-dim); }
 
-    /* ── Stats ── */
-    .stats-bar {
-      display: flex; gap: 20px; padding: 10px 16px;
-      border-bottom: 1px solid var(--border-color);
-      background: var(--bg-secondary); font-size: 13px;
-    }
-
-    .stat { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); }
-    .stat .value { font-weight: 600; color: var(--text-primary); }
-    .stat .dot { width: 8px; height: 8px; border-radius: 50%; }
-
-    /* ── Main Layout ── */
+    /* ── Main 3-Zone Layout ── */
     .main { display: flex; flex: 1; overflow: hidden; }
 
-    /* ── Group List (left) ── */
-    .group-list {
-      width: 320px; border-right: 1px solid var(--border-color);
+    /* ── Zone 1: Group List ── */
+    .zone-groups {
+      width: 260px; min-width: 260px; border-right: 1px solid var(--border-color);
       background: var(--bg-secondary); display: flex; flex-direction: column; flex-shrink: 0;
     }
-
-    .group-list-header {
-      padding: 10px 12px; border-bottom: 1px solid var(--border-color);
-      font-size: 12px; font-weight: 600; text-transform: uppercase;
-      letter-spacing: 0.5px; color: var(--text-muted);
+    .zone-groups-header {
+      padding: 8px 10px; border-bottom: 1px solid var(--border-color);
       display: flex; align-items: center; justify-content: space-between;
     }
-
-    .group-list-body { flex: 1; overflow-y: auto; }
+    .zone-groups-header span {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.5px; color: var(--text-muted);
+    }
+    .zone-groups-body { flex: 1; overflow-y: auto; }
 
     .group-card {
-      padding: 12px; border-bottom: 1px solid var(--border-color);
-      cursor: pointer; transition: background 0.1s;
+      padding: 10px; border-bottom: 1px solid var(--border-color);
+      cursor: pointer; transition: background 0.1s; position: relative;
     }
     .group-card:hover { background: var(--bg-tertiary); }
-    .group-card.selected { background: var(--accent-dim); border-left: 3px solid var(--accent); }
+    .group-card.selected { background: var(--accent-dim); border-left: 3px solid var(--accent); padding-left: 7px; }
 
-    .group-card-header {
-      display: flex; align-items: center; justify-content: space-between;
-      margin-bottom: 6px;
+    .gc-row { display: flex; align-items: center; justify-content: space-between; }
+    .gc-name {
+      font-size: 13px; font-weight: 600;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;
     }
-
-    .group-card-name {
-      font-size: 14px; font-weight: 600;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    .gc-channel {
+      font-size: 10px; margin-left: 4px; opacity: 0.5;
+    }
+    .gc-meta {
+      display: flex; gap: 6px; margin-top: 4px; font-size: 11px; color: var(--text-muted);
+      align-items: center;
+    }
+    .gc-queue-dot {
+      width: 6px; height: 6px; border-radius: 50%; background: var(--yellow);
+      animation: pulse 1.5s ease-in-out infinite;
     }
 
     .agent-badge {
-      font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 500;
+      font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 600;
     }
     .agent-badge.claude { background: var(--orange-dim); color: var(--orange); }
     .agent-badge.gemini { background: var(--blue-dim); color: var(--blue); }
@@ -171,921 +159,1293 @@
     .agent-badge.auto { background: var(--yellow-dim); color: var(--yellow); }
     .agent-badge.opencode { background: var(--green-dim); color: var(--green); }
 
-    .group-card-meta {
-      display: flex; gap: 10px; font-size: 12px; color: var(--text-muted);
-    }
-
     .trigger-tag {
       font-family: monospace; background: var(--bg-tertiary);
-      padding: 1px 6px; border-radius: 3px; font-size: 11px; color: var(--text-secondary);
+      padding: 0 5px; border-radius: 3px; font-size: 10px; color: var(--text-secondary);
     }
-
     .schedule-badge {
       font-family: monospace; background: var(--purple-dim); color: var(--purple);
-      padding: 1px 6px; border-radius: 3px; font-size: 11px; font-weight: 500;
+      padding: 0 5px; border-radius: 3px; font-size: 10px; font-weight: 500;
     }
 
-    /* ── Detail Panel (right) ── */
-    .detail { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    /* ── Zone 2: Detail Center ── */
+    .zone-detail { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
 
     .detail-header {
-      padding: 16px; border-bottom: 1px solid var(--border-color);
+      padding: 10px 16px; border-bottom: 1px solid var(--border-color);
+      display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+    }
+    .detail-header h2 { font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .detail-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+    /* Tabs */
+    .tab-bar {
+      display: flex; border-bottom: 1px solid var(--border-color);
+      background: var(--bg-secondary); flex-shrink: 0;
+    }
+    .tab {
+      padding: 8px 16px; font-size: 12px; font-weight: 500;
+      color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent;
+      transition: all 0.15s;
+    }
+    .tab:hover { color: var(--text-secondary); }
+    .tab.active { color: var(--text-primary); border-bottom-color: var(--accent); }
+    .tab-count {
+      font-size: 10px; background: var(--bg-tertiary); padding: 0 5px;
+      border-radius: 8px; margin-left: 4px; color: var(--text-muted);
+    }
+
+    .tab-content { flex: 1; overflow-y: auto; padding: 16px; }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+
+    /* ── Zone 3: Activity Feed ── */
+    .zone-activity {
+      width: 300px; min-width: 300px; border-left: 1px solid var(--border-color);
+      background: var(--bg-secondary); display: flex; flex-direction: column; flex-shrink: 0;
+      transition: width 0.2s, min-width 0.2s, opacity 0.2s;
+    }
+    .zone-activity.collapsed { width: 0; min-width: 0; overflow: hidden; opacity: 0; }
+
+    .zone-activity-header {
+      padding: 8px 10px; border-bottom: 1px solid var(--border-color);
       display: flex; align-items: center; justify-content: space-between;
     }
-    .detail-header h2 { font-size: 18px; font-weight: 600; }
-    .detail-actions { display: flex; gap: 8px; }
-
-    .detail-body { flex: 1; overflow-y: auto; padding: 16px; }
-
-    /* ── Config Section ── */
-    .config-grid {
-      display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px;
-    }
-
-    .config-item {
-      background: var(--bg-card); border: 1px solid var(--border-color);
-      border-radius: 8px; padding: 12px;
-    }
-
-    .config-label {
+    .zone-activity-header span {
       font-size: 11px; font-weight: 600; text-transform: uppercase;
-      letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 4px;
+      letter-spacing: 0.5px; color: var(--text-muted);
     }
+    .activity-feed { flex: 1; overflow-y: auto; padding: 8px; }
 
-    .config-value { font-size: 14px; font-weight: 500; }
-
-    .folder-list { display: flex; flex-wrap: wrap; gap: 4px; }
-
-    .folder-tag {
-      font-size: 12px; background: var(--blue-dim); color: var(--blue);
-      padding: 2px 8px; border-radius: 4px;
-    }
-
-    .sender-list { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-
-    .sender-tag {
-      font-size: 12px; background: var(--bg-tertiary);
-      padding: 2px 8px; border-radius: 4px; color: var(--text-secondary);
-      display: inline-flex; align-items: center; gap: 4px;
-    }
-    .sender-tag .remove-sender {
-      cursor: pointer; opacity: 0.5; font-size: 14px; line-height: 1;
-    }
-    .sender-tag .remove-sender:hover { opacity: 1; color: var(--accent); }
-
-    /* ── Form Elements ── */
-    .form-input, .form-select, .form-textarea {
-      width: 100%; padding: 6px 10px; border-radius: 6px;
-      border: 1px solid var(--border-color); background: var(--bg-tertiary);
-      color: var(--text-primary); font-size: 13px; font-family: inherit;
-      outline: none; transition: border-color 0.15s;
-    }
-    .form-input:focus, .form-select:focus, .form-textarea:focus {
-      border-color: var(--blue);
-    }
-    .form-textarea { resize: vertical; min-height: 60px; }
-    .form-select { cursor: pointer; }
-    .form-row { margin-bottom: 12px; }
-    .form-row label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.3px; }
-    .form-row-inline { display: flex; gap: 8px; align-items: flex-end; }
-    .form-row-inline .form-row { flex: 1; margin-bottom: 0; }
-    .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
-    .form-check { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
-    .form-check input { cursor: pointer; }
-
-    /* ── Health Panel ── */
-    .health-panel {
+    .activity-item {
+      padding: 8px; border-radius: 6px; margin-bottom: 6px;
       background: var(--bg-card); border: 1px solid var(--border-color);
-      border-radius: 8px; padding: 14px; margin-bottom: 20px;
+      font-size: 12px;
     }
+    .activity-item .ai-group { font-weight: 600; font-size: 11px; margin-bottom: 3px; }
+    .activity-item .ai-msg { color: var(--text-secondary); line-height: 1.4; word-break: break-word; }
+    .activity-item .ai-time { color: var(--text-muted); font-size: 10px; margin-top: 3px; }
+    .activity-item.ai-incoming { border-left: 2px solid var(--blue); }
+    .activity-item.ai-outgoing { border-left: 2px solid var(--green); }
+    .activity-item.ai-error { border-left: 2px solid var(--accent); }
 
-    .health-panel h3 {
-      font-size: 13px; font-weight: 600; margin-bottom: 10px;
-      text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted);
+    /* Inject form at bottom of activity */
+    .inject-form {
+      padding: 8px 10px; border-top: 1px solid var(--border-color);
+      flex-shrink: 0;
     }
-
-    .health-grid { display: flex; gap: 16px; }
-
-    .health-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-
-    .health-dot { width: 10px; height: 10px; border-radius: 50%; }
-    .health-dot.ok { background: var(--green); }
-    .health-dot.warn { background: var(--yellow); }
-    .health-dot.error { background: var(--accent); }
+    .inject-form label {
+      font-size: 10px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.3px; color: var(--text-muted); margin-bottom: 4px; display: block;
+    }
+    .inject-row { display: flex; gap: 4px; margin-top: 4px; }
 
     /* ── Empty State ── */
     .empty-state {
       display: flex; flex-direction: column; align-items: center;
-      justify-content: center; height: 100%; gap: 16px; color: var(--text-muted);
+      justify-content: center; height: 100%; gap: 12px; color: var(--text-muted);
     }
-    .empty-state .icon { font-size: 48px; opacity: 0.5; }
-    .empty-state p { font-size: 14px; text-align: center; max-width: 320px; line-height: 1.5; }
+    .empty-state .icon { font-size: 40px; opacity: 0.5; }
+    .empty-state p { font-size: 13px; text-align: center; max-width: 280px; line-height: 1.5; }
 
-    /* ── Modal Overlay ── */
-    .modal-overlay {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.6);
-      display: flex; align-items: center; justify-content: center;
-      z-index: 200; opacity: 0; pointer-events: none; transition: opacity 0.2s;
+    /* ── Form Elements ── */
+    .form-input, .form-select, .form-textarea {
+      width: 100%; padding: 5px 8px; border-radius: 5px;
+      border: 1px solid var(--border-color); background: var(--bg-tertiary);
+      color: var(--text-primary); font-size: 12px; font-family: inherit;
+      outline: none; transition: border-color 0.15s;
     }
-    .modal-overlay.visible { opacity: 1; pointer-events: auto; }
-
-    .modal {
-      background: var(--bg-secondary); border: 1px solid var(--border-color);
-      border-radius: 12px; padding: 20px; min-width: 420px; max-width: 520px;
-      max-height: 80vh; overflow-y: auto;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    .form-input:focus, .form-select:focus, .form-textarea:focus { border-color: var(--blue); }
+    .form-textarea { resize: vertical; min-height: 50px; }
+    .form-select { cursor: pointer; }
+    .form-row { margin-bottom: 10px; }
+    .form-row label {
+      display: block; font-size: 11px; font-weight: 600; color: var(--text-muted);
+      margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.3px;
     }
-    .modal h3 { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
+    .form-row-inline { display: flex; gap: 8px; align-items: flex-end; }
+    .form-row-inline .form-row { flex: 1; margin-bottom: 0; }
+    .form-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 12px; }
+    .form-check { display: flex; align-items: center; gap: 5px; font-size: 12px; cursor: pointer; }
+    .form-check input { cursor: pointer; }
 
-    /* ── Settings Panel ── */
+    /* ── Overview Cards ── */
+    .overview-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px;
+    }
+    .overview-card {
+      background: var(--bg-card); border: 1px solid var(--border-color);
+      border-radius: 8px; padding: 12px;
+    }
+    .overview-card .oc-label {
+      font-size: 10px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 3px;
+    }
+    .overview-card .oc-value { font-size: 14px; font-weight: 600; }
+
+    /* ── Health Grid ── */
+    .health-grid { display: flex; gap: 14px; flex-wrap: wrap; }
+    .health-item { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+    .health-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .health-dot.ok { background: var(--green); }
+    .health-dot.warn { background: var(--yellow); }
+    .health-dot.error { background: var(--accent); }
+
+    /* ── Sender Tags ── */
+    .sender-list { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+    .sender-tag {
+      font-size: 11px; background: var(--bg-tertiary);
+      padding: 2px 6px; border-radius: 4px; color: var(--text-secondary);
+      display: inline-flex; align-items: center; gap: 3px;
+    }
+    .sender-tag .remove-sender { cursor: pointer; opacity: 0.5; font-size: 13px; line-height: 1; }
+    .sender-tag .remove-sender:hover { opacity: 1; color: var(--accent); }
+
+    .folder-tag {
+      font-size: 11px; background: var(--blue-dim); color: var(--blue);
+      padding: 1px 6px; border-radius: 4px;
+    }
+
+    /* ── Task List ── */
+    .task-row {
+      display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+      background: var(--bg-card); border: 1px solid var(--border-color);
+      border-radius: 6px; margin-bottom: 6px; font-size: 12px;
+    }
+    .task-name { font-weight: 600; flex: 1; }
+    .task-cron { font-family: monospace; color: var(--purple); font-size: 11px; }
+    .task-next { color: var(--text-muted); font-size: 11px; }
+
+    /* ── Inline Register/Settings panels ── */
+    .inline-panel {
+      background: var(--bg-card); border: 1px solid var(--border-color);
+      border-radius: 8px; padding: 16px; margin-bottom: 16px;
+    }
+    .inline-panel h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+
+    /* ── Settings Section ── */
     .settings-section {
       background: var(--bg-card); border: 1px solid var(--border-color);
-      border-radius: 8px; padding: 14px; margin-bottom: 16px;
+      border-radius: 8px; padding: 12px; margin-bottom: 12px;
     }
     .settings-section h4 {
-      font-size: 12px; font-weight: 600; text-transform: uppercase;
-      letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 10px;
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 8px;
     }
     .concurrency-row {
-      display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
-      font-size: 13px;
+      display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px;
     }
-    .concurrency-row .agent-name { width: 80px; font-weight: 500; }
+    .concurrency-row .agent-name { width: 70px; }
     .concurrency-row input[type="number"] {
-      width: 60px; padding: 4px 8px; border-radius: 4px;
+      width: 50px; padding: 3px 6px; border-radius: 4px;
       border: 1px solid var(--border-color); background: var(--bg-tertiary);
-      color: var(--text-primary); font-size: 13px; text-align: center;
+      color: var(--text-primary); font-size: 12px; text-align: center;
     }
-    .concurrency-row .slots-label { color: var(--text-muted); font-size: 12px; }
+    .concurrency-row .slots-label { color: var(--text-muted); font-size: 11px; }
+
+    /* ── Discovery Table ── */
+    .discovery-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .discovery-table th {
+      text-align: left; padding: 6px 8px; font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.3px; color: var(--text-muted);
+      border-bottom: 1px solid var(--border-color);
+    }
+    .discovery-table td {
+      padding: 6px 8px; border-bottom: 1px solid var(--border-color);
+    }
+    .discovery-table tr:hover { background: var(--bg-tertiary); }
+    .discovery-table .reg-badge {
+      font-size: 10px; padding: 1px 5px; border-radius: 3px;
+    }
+    .discovery-table .reg-badge.yes { background: var(--green-dim); color: var(--green); }
+    .discovery-table .reg-badge.no { background: var(--bg-tertiary); color: var(--text-muted); }
 
     /* ── Toast ── */
     .toast {
-      position: fixed; bottom: 16px; right: 16px;
-      padding: 10px 16px; border-radius: 8px; font-size: 13px; font-weight: 500;
+      position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%) translateY(60px);
+      padding: 8px 16px; border-radius: 8px; font-size: 12px; font-weight: 500;
       background: var(--bg-card); border: 1px solid var(--border-color);
       color: var(--text-primary); box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-      transform: translateY(100px); opacity: 0; transition: all 0.3s ease; z-index: 100;
+      opacity: 0; transition: all 0.3s ease; z-index: 100;
     }
-    .toast.visible { transform: translateY(0); opacity: 1; }
+    .toast.visible { transform: translateX(-50%) translateY(0); opacity: 1; }
     .toast.success { border-color: var(--green); }
     .toast.error { border-color: var(--accent); }
 
     /* ── Scrollbar ── */
-    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar { width: 5px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+
+    /* ── Aggregate summary (no group selected) ── */
+    .agg-summary { padding: 24px; }
+    .agg-summary h2 { font-size: 18px; font-weight: 600; margin-bottom: 16px; }
+    .agg-health {
+      background: var(--bg-card); border: 1px solid var(--border-color);
+      border-radius: 8px; padding: 14px; margin-bottom: 16px;
+    }
+    .agg-health h3 {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 10px;
+    }
   </style>
 </head>
 <body>
-  <!-- Header -->
-  <div class="header">
-    <div class="header-left">
-      <h1>Claw Pipeline</h1>
-      <div class="pipeline-badge stopped" id="pipelineBadge">
-        <span class="pipeline-dot"></span>
-        <span id="pipelineText">Stopped</span>
-      </div>
+
+<!-- Header -->
+<div class="header">
+  <div class="header-left">
+    <h1>Claw</h1>
+    <div class="pipeline-badge stopped" id="pipelineBadge">
+      <span class="pipeline-dot"></span>
+      <span id="pipelineText">Stopped</span>
     </div>
-    <div class="header-actions">
-      <button class="btn btn-icon" id="settingsBtn" title="Settings">&#9881;</button>
-      <button class="btn" id="refreshBtn">Refresh</button>
-      <button class="btn btn-start" id="startStopBtn">Start</button>
+    <div class="header-stats">
+      <div class="stat"><span class="dot" style="background:var(--green)"></span> WA <span class="value" id="waStatus">--</span></div>
+      <div class="stat"><span class="dot" style="background:var(--blue)"></span> TG <span class="value" id="tgStatus">--</span></div>
+      <div class="stat" id="queueStat" style="display:none">Queue <span class="value" id="queueDepth">0</span></div>
+    </div>
+  </div>
+  <div class="header-actions">
+    <button class="btn btn-icon btn-ghost" id="activityToggle" title="Toggle activity feed">&#9776;</button>
+    <button class="btn btn-start" id="startStopBtn">Start</button>
+  </div>
+</div>
+
+<!-- Main 3-zone layout -->
+<div class="main">
+
+  <!-- Zone 1: Group List -->
+  <div class="zone-groups">
+    <div class="zone-groups-header">
+      <span>Groups</span>
+      <button class="btn btn-sm btn-primary" id="registerBtn">+ Add</button>
+    </div>
+    <div class="zone-groups-body" id="groupCards">
+      <div class="empty-state" style="padding: 30px 12px;">
+        <p>No groups registered yet</p>
+      </div>
     </div>
   </div>
 
-  <!-- Stats -->
-  <div class="stats-bar">
-    <div class="stat"><span class="dot" style="background:var(--green)"></span> WhatsApp <span class="value" id="waStatus">unknown</span></div>
-    <div class="stat"><span class="dot" style="background:var(--blue)"></span> Telegram <span class="value" id="tgStatus">unknown</span></div>
-    <div class="stat">Runner <span class="value" id="runnerStatus">--</span></div>
-    <div class="stat">Courier <span class="value" id="courierStatus">--</span></div>
-    <div class="stat">Groups <span class="value" id="groupCountStat">0</span></div>
-    <div class="stat" id="queueStat" style="display:none">Queue <span class="value" id="queueDepth">0</span></div>
-  </div>
+  <!-- Zone 2: Detail Center -->
+  <div class="zone-detail" id="zoneDetail">
 
-  <!-- Main -->
-  <div class="main">
-    <!-- Group List -->
-    <div class="group-list">
-      <div class="group-list-header">
-        <span>Registered Groups</span>
-        <button class="btn btn-sm btn-primary" id="registerBtn">+ Register</button>
-      </div>
-      <div class="group-list-body" id="groupCards">
-        <div class="empty-state" style="padding: 40px 16px;">
-          <span class="icon">&#129438;</span>
-          <p>No groups registered. Click <strong>+ Register</strong> to add one.</p>
-        </div>
-      </div>
-    </div>
+    <!-- No group selected: aggregate view -->
+    <div id="aggView">
+      <div class="agg-summary">
+        <h2>Dashboard</h2>
 
-    <!-- Detail Panel -->
-    <div class="detail" id="detailPanel">
-      <div class="empty-state" id="detailEmpty">
-        <span class="icon">&#129438;</span>
-        <p>Select a group to view and edit its configuration</p>
-      </div>
-
-      <div id="detailContent" style="display: none;">
-        <div class="detail-header">
-          <h2 id="detailGroupName">Group Name</h2>
-          <div class="detail-actions">
-            <button class="btn btn-sm" id="resetBtn">Reset Session</button>
-            <button class="btn btn-sm" id="clearLogBtn">Clear Log</button>
-            <button class="btn btn-sm btn-stop" id="unregisterBtn">Unregister</button>
+        <div class="agg-health" id="aggHealth">
+          <h3>System Health</h3>
+          <div class="health-grid" id="aggHealthGrid">
+            <div class="health-item"><span class="health-dot" id="aggHealthDot"></span> <span id="aggHealthLabel">Loading...</span></div>
           </div>
         </div>
 
-        <div class="detail-body">
-          <!-- Health -->
-          <div class="health-panel" id="healthPanel">
+        <div class="overview-grid" id="aggStats">
+          <div class="overview-card">
+            <div class="oc-label">Groups</div>
+            <div class="oc-value" id="aggGroupCount">0</div>
+          </div>
+          <div class="overview-card">
+            <div class="oc-label">Runner</div>
+            <div class="oc-value" id="aggRunner">--</div>
+          </div>
+          <div class="overview-card">
+            <div class="oc-label">Courier</div>
+            <div class="oc-value" id="aggCourier">--</div>
+          </div>
+          <div class="overview-card">
+            <div class="oc-label">Scheduled Tasks</div>
+            <div class="oc-value" id="aggTasks">--</div>
+          </div>
+        </div>
+
+        <!-- Inline register form -->
+        <div class="inline-panel" id="registerPanel" style="display:none;">
+          <h3>Register Group</h3>
+          <div class="form-row">
+            <label>Group Name</label>
+            <input type="text" class="form-input" id="regGroup" placeholder="Group name or chat ID (partial match)">
+          </div>
+          <div class="form-row-inline">
+            <div class="form-row">
+              <label>Channel</label>
+              <select class="form-select" id="regChannel">
+                <option value="">Auto-detect</option>
+                <option value="whatsapp">WhatsApp</option>
+                <option value="telegram">Telegram</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label>Agent</label>
+              <select class="form-select" id="regAgent">
+                <option value="claude">claude</option>
+                <option value="gemini">gemini</option>
+                <option value="aider">aider</option>
+                <option value="opencode">opencode</option>
+                <option value="auto">auto</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row-inline">
+            <div class="form-row">
+              <label>Trigger</label>
+              <input type="text" class="form-input" id="regTrigger" placeholder="e.g. @">
+            </div>
+            <div class="form-row">
+              <label>Schedule</label>
+              <select class="form-select" id="regSchedule">
+                <option value="">Real-time</option>
+                <option value="@5m">@5m</option>
+                <option value="@15m">@15m</option>
+                <option value="@30m">@30m</option>
+                <option value="@hourly">@hourly</option>
+                <option value="@daily">@daily</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <label>Folders <span style="font-weight:normal;text-transform:none">(comma-separated)</span></label>
+            <input type="text" class="form-input" id="regFolders" placeholder="e.g. lura, photon">
+          </div>
+          <div class="form-row">
+            <label>System Prompt</label>
+            <textarea class="form-textarea" id="regSystemPrompt" placeholder="Optional..."></textarea>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-sm" id="regCancelBtn">Cancel</button>
+            <button class="btn btn-sm btn-primary" id="regSubmitBtn">Register</button>
+          </div>
+        </div>
+
+        <!-- Inline settings -->
+        <div class="inline-panel" id="settingsPanel" style="display:none;">
+          <h3>Pipeline Settings</h3>
+          <div class="settings-section">
+            <h4>Agent Concurrency</h4>
+            <div id="concurrencyRows"></div>
+          </div>
+          <div class="settings-section">
+            <h4>General</h4>
+            <div class="form-row">
+              <label>Agent Name</label>
+              <input type="text" class="form-input" id="setAgentName" placeholder="Lura">
+            </div>
+            <div class="form-row">
+              <label>Heartbeat (ms)</label>
+              <input type="number" class="form-input" id="setHeartbeat" min="5000" step="5000">
+            </div>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-sm" id="setCancelBtn">Close</button>
+            <button class="btn btn-sm btn-primary" id="setSaveBtn">Save</button>
+          </div>
+        </div>
+
+        <!-- Group Discovery -->
+        <div class="inline-panel" id="discoveryPanel" style="display:none;">
+          <h3>Available Groups</h3>
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Groups discovered across all channels. Click a row to register it.</p>
+          <table class="discovery-table">
+            <thead><tr><th>Name</th><th>Channel</th><th>Status</th></tr></thead>
+            <tbody id="discoveryBody"></tbody>
+          </table>
+        </div>
+
+        <!-- Quick actions when no group selected -->
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+          <button class="btn btn-sm" id="showDiscoveryBtn">Browse Groups</button>
+          <button class="btn btn-sm" id="showSettingsBtn">Settings</button>
+          <button class="btn btn-sm" id="refreshBtn">Refresh</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Group selected: tabbed detail -->
+    <div id="groupDetailView" style="display:none;flex-direction:column;flex:1;overflow:hidden;">
+      <div class="detail-header">
+        <h2 id="detailGroupName">Group</h2>
+        <div class="detail-actions">
+          <button class="btn btn-sm btn-danger btn-ghost" id="unregisterBtn">Unregister</button>
+        </div>
+      </div>
+
+      <div class="tab-bar">
+        <div class="tab active" data-tab="overview">Overview</div>
+        <div class="tab" data-tab="config">Config</div>
+        <div class="tab" data-tab="tasks">Tasks <span class="tab-count" id="taskCount">0</span></div>
+        <div class="tab" data-tab="memory">Memory</div>
+      </div>
+
+      <!-- Tab: Overview -->
+      <div class="tab-content">
+        <div class="tab-pane active" id="pane-overview">
+          <div class="overview-grid">
+            <div class="overview-card">
+              <div class="oc-label">Agent</div>
+              <div class="oc-value" id="ovAgent">--</div>
+            </div>
+            <div class="overview-card">
+              <div class="oc-label">Channel</div>
+              <div class="oc-value" id="ovChannel">--</div>
+            </div>
+            <div class="overview-card">
+              <div class="oc-label">Trigger</div>
+              <div class="oc-value" id="ovTrigger">--</div>
+            </div>
+            <div class="overview-card">
+              <div class="oc-label">Delivery</div>
+              <div class="oc-value" id="ovDelivery">--</div>
+            </div>
+            <div class="overview-card">
+              <div class="oc-label">Folders</div>
+              <div class="oc-value" id="ovFolders">--</div>
+            </div>
+            <div class="overview-card">
+              <div class="oc-label">Senders</div>
+              <div class="oc-value" id="ovSenders">--</div>
+            </div>
+          </div>
+
+          <div class="agg-health" style="margin-top:4px;">
             <h3>Health</h3>
-            <div class="health-grid" id="healthGrid">
-              <div class="health-item"><span class="health-dot" id="healthDot"></span> <span id="healthLabel">Checking...</span></div>
-              <div class="health-item" style="color: var(--text-muted);" id="healthTime"></div>
+            <div class="health-grid" id="groupHealthGrid">
+              <div class="health-item"><span class="health-dot" id="groupHealthDot"></span> <span id="groupHealthLabel">--</span></div>
+              <div class="health-item" style="color:var(--text-muted)" id="groupHealthTime"></div>
             </div>
           </div>
 
-          <!-- Editable Config -->
-          <div id="editConfigForm">
-            <div class="form-row-inline">
-              <div class="form-row">
-                <label>Trigger</label>
-                <input type="text" class="form-input" id="cfgTrigger" placeholder="e.g. @ (empty = participant mode)">
-              </div>
-              <div class="form-row">
-                <label style="visibility:hidden">_</label>
-                <label class="form-check">
-                  <input type="checkbox" id="cfgRequiresTrigger"> Requires trigger
-                </label>
-              </div>
-            </div>
+          <div style="margin-top:12px;font-size:11px;color:var(--text-muted);">
+            Registered: <span id="ovAddedAt">--</span>
+          </div>
+        </div>
 
-            <div class="form-row-inline">
-              <div class="form-row">
-                <label>Agent</label>
-                <select class="form-select" id="cfgAgent">
-                  <option value="claude">claude</option>
-                  <option value="gemini">gemini</option>
-                  <option value="aider">aider</option>
-                  <option value="opencode">opencode</option>
-                  <option value="auto">auto</option>
-                </select>
-              </div>
-              <div class="form-row">
-                <label>Delivery Schedule</label>
-                <select class="form-select" id="cfgSchedule">
-                  <option value="">Real-time (no schedule)</option>
-                  <option value="@5m">@5m</option>
-                  <option value="@15m">@15m</option>
-                  <option value="@30m">@30m</option>
-                  <option value="@hourly">@hourly</option>
-                  <option value="@daily">@daily</option>
-                </select>
-              </div>
-            </div>
-
+        <!-- Tab: Config -->
+        <div class="tab-pane" id="pane-config">
+          <div class="form-row-inline">
             <div class="form-row">
-              <label>Folders <span style="font-weight:normal;text-transform:none">(comma-separated)</span></label>
-              <input type="text" class="form-input" id="cfgFolders" placeholder="e.g. lura, photon">
+              <label>Trigger</label>
+              <input type="text" class="form-input" id="cfgTrigger" placeholder="e.g. @ (empty = participant)">
             </div>
-
             <div class="form-row">
-              <label>System Prompt</label>
-              <textarea class="form-textarea" id="cfgSystemPrompt" placeholder="Optional system prompt for this group's agent..."></textarea>
+              <label style="visibility:hidden">_</label>
+              <label class="form-check"><input type="checkbox" id="cfgRequiresTrigger"> Requires trigger</label>
             </div>
-
-            <!-- Senders -->
+          </div>
+          <div class="form-row-inline">
             <div class="form-row">
-              <label>Allowed Senders</label>
-              <div class="sender-list" id="sendersList"></div>
-              <div class="form-row-inline" style="margin-top: 6px;">
-                <input type="text" class="form-input" id="addSenderInput" placeholder="+60123456789" style="flex:1">
-                <button class="btn btn-sm" id="addSenderBtn">Add</button>
-              </div>
+              <label>Agent</label>
+              <select class="form-select" id="cfgAgent">
+                <option value="claude">claude</option>
+                <option value="gemini">gemini</option>
+                <option value="aider">aider</option>
+                <option value="opencode">opencode</option>
+                <option value="auto">auto</option>
+              </select>
             </div>
+            <div class="form-row">
+              <label>Schedule</label>
+              <select class="form-select" id="cfgSchedule">
+                <option value="">Real-time</option>
+                <option value="@5m">@5m</option>
+                <option value="@15m">@15m</option>
+                <option value="@30m">@30m</option>
+                <option value="@hourly">@hourly</option>
+                <option value="@daily">@daily</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <label>Folders <span style="font-weight:normal;text-transform:none">(comma-separated)</span></label>
+            <input type="text" class="form-input" id="cfgFolders" placeholder="e.g. lura, photon">
+          </div>
+          <div class="form-row">
+            <label>System Prompt</label>
+            <textarea class="form-textarea" id="cfgSystemPrompt" placeholder="Custom system prompt for this group..."></textarea>
+          </div>
 
+          <!-- Senders inline -->
+          <div class="form-row">
+            <label>Allowed Senders</label>
+            <div class="sender-list" id="sendersList"></div>
+            <div class="form-row-inline" style="margin-top:4px;">
+              <input type="text" class="form-input" id="addSenderInput" placeholder="+60123456789" style="flex:1">
+              <button class="btn btn-sm" id="addSenderBtn">Add</button>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button class="btn btn-sm" id="cfgRevertBtn">Revert</button>
+            <button class="btn btn-sm btn-primary" id="cfgSaveBtn">Save</button>
+          </div>
+        </div>
+
+        <!-- Tab: Tasks -->
+        <div class="tab-pane" id="pane-tasks">
+          <div id="taskList"></div>
+
+          <div class="inline-panel" style="margin-top:12px;">
+            <h3>Schedule New Task</h3>
+            <div class="form-row">
+              <label>Task Name</label>
+              <input type="text" class="form-input" id="newTaskName" placeholder="daily-summary">
+            </div>
+            <div class="form-row">
+              <label>Cron / Interval</label>
+              <input type="text" class="form-input" id="newTaskCron" placeholder="@daily or */30 * * * *">
+            </div>
+            <div class="form-row">
+              <label>Prompt</label>
+              <textarea class="form-textarea" id="newTaskPrompt" placeholder="What should the agent do?"></textarea>
+            </div>
             <div class="form-actions">
-              <button class="btn btn-sm" id="cfgRevertBtn">Revert</button>
-              <button class="btn btn-sm btn-primary" id="cfgSaveBtn">Save Changes</button>
+              <button class="btn btn-sm btn-primary" id="createTaskBtn">Create Task</button>
             </div>
           </div>
+        </div>
 
-          <!-- Read-only info -->
-          <div style="margin-top: 12px; font-size: 12px; color: var(--text-muted);">
-            Added: <span id="cfgAddedAt">--</span> &middot; Channel: <span id="cfgChannel">--</span>
+        <!-- Tab: Memory -->
+        <div class="tab-pane" id="pane-memory">
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
+            Conversation memory for this group. Compact to extract durable facts from recent messages.
+          </p>
+          <div style="display:flex;gap:8px;margin-bottom:12px;">
+            <button class="btn btn-sm" id="resetBtn">Reset Session</button>
+            <button class="btn btn-sm" id="clearLogBtn">Clear Message Log</button>
+            <button class="btn btn-sm btn-primary" id="compactBtn">Compact Memory</button>
+          </div>
+          <div id="compactResult" style="display:none;" class="inline-panel">
+            <h3>Compaction Result</h3>
+            <div id="compactDetails" style="font-size:12px;"></div>
           </div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Register Modal -->
-  <div class="modal-overlay" id="registerModal">
-    <div class="modal">
-      <h3>Register Group</h3>
-      <div class="form-row">
-        <label>Group Name</label>
-        <input type="text" class="form-input" id="regGroup" placeholder="Group name or chat ID (partial match)">
+  <!-- Zone 3: Activity Feed -->
+  <div class="zone-activity" id="zoneActivity">
+    <div class="zone-activity-header">
+      <span>Activity</span>
+      <button class="btn btn-sm btn-ghost btn-icon" id="clearActivityBtn" title="Clear">&#10005;</button>
+    </div>
+    <div class="activity-feed" id="activityFeed">
+      <div class="empty-state" style="padding:30px 12px;">
+        <p style="font-size:11px;">Activity will appear here as messages flow through the pipeline</p>
       </div>
-      <div class="form-row-inline">
-        <div class="form-row">
-          <label>Channel</label>
-          <select class="form-select" id="regChannel">
-            <option value="">Auto-detect</option>
-            <option value="whatsapp">WhatsApp</option>
-            <option value="telegram">Telegram</option>
-          </select>
-        </div>
-        <div class="form-row">
-          <label>Agent</label>
-          <select class="form-select" id="regAgent">
-            <option value="claude">claude</option>
-            <option value="gemini">gemini</option>
-            <option value="aider">aider</option>
-            <option value="opencode">opencode</option>
-            <option value="auto">auto</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-row-inline">
-        <div class="form-row">
-          <label>Trigger</label>
-          <input type="text" class="form-input" id="regTrigger" placeholder="e.g. @">
-        </div>
-        <div class="form-row">
-          <label>Schedule</label>
-          <select class="form-select" id="regSchedule">
-            <option value="">Real-time</option>
-            <option value="@5m">@5m</option>
-            <option value="@15m">@15m</option>
-            <option value="@30m">@30m</option>
-            <option value="@hourly">@hourly</option>
-            <option value="@daily">@daily</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-row">
-        <label>Folders <span style="font-weight:normal;text-transform:none">(comma-separated)</span></label>
-        <input type="text" class="form-input" id="regFolders" placeholder="e.g. lura, photon">
-      </div>
-      <div class="form-row">
-        <label>System Prompt</label>
-        <textarea class="form-textarea" id="regSystemPrompt" placeholder="Optional..."></textarea>
-      </div>
-      <div class="form-actions">
-        <button class="btn btn-sm" id="regCancelBtn">Cancel</button>
-        <button class="btn btn-sm btn-primary" id="regSubmitBtn">Register</button>
+    </div>
+    <div class="inject-form">
+      <label>Inject Test Message</label>
+      <select class="form-select" id="injectGroup" style="margin-bottom:4px;">
+        <option value="">Select group...</option>
+      </select>
+      <div class="inject-row">
+        <input type="text" class="form-input" id="injectMsg" placeholder="Test message..." style="flex:1">
+        <button class="btn btn-sm btn-primary" id="injectBtn">Send</button>
       </div>
     </div>
   </div>
 
-  <!-- Settings Modal -->
-  <div class="modal-overlay" id="settingsModal">
-    <div class="modal">
-      <h3>Pipeline Settings</h3>
-      <div class="settings-section">
-        <h4>Agent Concurrency</h4>
-        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px;">
-          Max parallel tasks per agent. Independent queues: a busy claude won't block gemini.
-        </p>
-        <div id="concurrencyRows"></div>
-      </div>
-      <div class="settings-section">
-        <h4>General</h4>
-        <div class="form-row">
-          <label>Agent Name Prefix</label>
-          <input type="text" class="form-input" id="setAgentName" placeholder="Lura">
-        </div>
-        <div class="form-row">
-          <label>Heartbeat Interval (ms)</label>
-          <input type="number" class="form-input" id="setHeartbeat" min="5000" step="5000">
-        </div>
-      </div>
-      <div class="form-actions">
-        <button class="btn btn-sm" id="setCancelBtn">Close</button>
-        <button class="btn btn-sm btn-primary" id="setSaveBtn">Save Settings</button>
-      </div>
-    </div>
-  </div>
+</div>
 
-  <!-- Toast -->
-  <div class="toast" id="toast"></div>
+<!-- Toast -->
+<div class="toast" id="toast"></div>
 
-  <script>
-    let state = {
-      running: false,
-      whatsapp: null,
-      telegram: null,
-      runner: null,
-      courier: null,
-      queue: {},
-      groups: [],
-      health: null,
-      selectedGroup: null,
-      _prevGroupNames: new Set(),
-      _settings: null, // cached settings from photon
-    };
+<script>
+  const state = {
+    running: false,
+    whatsapp: null,
+    telegram: null,
+    runner: null,
+    courier: null,
+    queue: {},
+    groups: [],
+    health: null,
+    selectedGroup: null,
+    tasks: [],
+    activityLog: [],
+    _prevGroupNames: new Set(),
+    _settings: null,
+    _discoveredGroups: [],
+  };
 
-    const $ = id => document.getElementById(id);
+  const $ = id => document.getElementById(id);
+  const MAX_ACTIVITY = 50;
 
-    function parseMCP(raw) {
-      if (raw && raw.content && Array.isArray(raw.content)) {
-        const item = raw.content.find(c => c.type === 'text' && c.text);
-        if (item) { try { return JSON.parse(item.text); } catch(e) { return item.text; } }
-      }
-      return raw;
+  function parseMCP(raw) {
+    if (raw && raw.content && Array.isArray(raw.content)) {
+      const item = raw.content.find(c => c.type === 'text' && c.text);
+      if (item) { try { return JSON.parse(item.text); } catch { return item.text; } }
+    }
+    return raw;
+  }
+
+  let toastTimer;
+  function toast(msg, type = 'info') {
+    const el = $('toast');
+    el.textContent = msg;
+    el.className = 'toast visible ' + type;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.className = 'toast', 3000);
+  }
+
+  function esc(s) {
+    const d = document.createElement('div'); d.textContent = s; return d.innerHTML;
+  }
+
+  function timeAgo(iso) {
+    if (!iso) return 'Never';
+    const diff = Date.now() - new Date(iso).getTime();
+    const s = Math.floor(diff / 1000);
+    if (s < 60) return s + 's ago';
+    const m = Math.floor(s / 60);
+    if (m < 60) return m + 'm ago';
+    return Math.floor(m / 60) + 'h ago';
+  }
+
+  // ─── Tabs ───
+
+  function switchTab(tabName) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + tabName));
+  }
+
+  document.querySelector('.tab-bar').addEventListener('click', e => {
+    const tab = e.target.closest('.tab');
+    if (tab) switchTab(tab.dataset.tab);
+  });
+
+  // ─── Render ───
+
+  function renderHeader() {
+    const badge = $('pipelineBadge');
+    const text = $('pipelineText');
+    const btn = $('startStopBtn');
+
+    if (state.running) {
+      badge.className = 'pipeline-badge running';
+      text.textContent = 'Running';
+      btn.textContent = 'Stop';
+      btn.className = 'btn btn-stop';
+    } else {
+      badge.className = 'pipeline-badge stopped';
+      text.textContent = 'Stopped';
+      btn.textContent = 'Start';
+      btn.className = 'btn btn-start';
     }
 
-    let toastTimer;
-    function toast(msg, type = 'info') {
-      const el = $('toast');
-      el.textContent = msg;
-      el.className = 'toast visible ' + type;
-      clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => el.className = 'toast', 3000);
+    $('waStatus').textContent = state.whatsapp?.status || '--';
+    $('tgStatus').textContent = state.telegram?.status || '--';
+
+    // Queue indicator
+    const qEntries = Object.entries(state.queue || {});
+    const totalActive = qEntries.reduce((sum, [, q]) => sum + (q.active || 0), 0);
+    const totalDepth = qEntries.reduce((sum, [, q]) => sum + (q.depth || 0), 0);
+    if (totalActive > 0 || totalDepth > 0) {
+      $('queueStat').style.display = '';
+      const parts = qEntries.map(([a, q]) => a + ':' + q.active + '/' + q.concurrency + (q.depth > 0 ? '+' + q.depth : ''));
+      $('queueDepth').textContent = parts.join(' ');
+    } else {
+      $('queueStat').style.display = 'none';
+    }
+  }
+
+  function renderGroups() {
+    const container = $('groupCards');
+    if (state.groups.length === 0) {
+      container.innerHTML = '<div class="empty-state" style="padding:30px 12px;"><p>No groups registered yet</p></div>';
+      return;
     }
 
-    function escapeHtml(s) {
-      const d = document.createElement('div'); d.textContent = s; return d.innerHTML;
+    container.innerHTML = state.groups.map(g => {
+      const sel = state.selectedGroup === g.name ? ' selected' : '';
+      const ac = g.agent || 'claude';
+      const queueActive = Object.values(state.queue || {}).some(q => q.active > 0);
+      return '<div class="group-card' + sel + '" data-name="' + esc(g.name) + '">' +
+        '<div class="gc-row">' +
+          '<span class="gc-name">' + esc(g.name) + '</span>' +
+          '<span class="agent-badge ' + ac + '">' + ac + '</span>' +
+        '</div>' +
+        '<div class="gc-meta">' +
+          '<span class="gc-channel">' + (g.channel === 'telegram' ? 'TG' : 'WA') + '</span>' +
+          (g.trigger ? '<span class="trigger-tag">' + esc(g.trigger) + '</span>' : '') +
+          (g.schedule ? '<span class="schedule-badge">' + esc(g.schedule) + '</span>' : '') +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+    container.querySelectorAll('.group-card').forEach(el => {
+      el.addEventListener('click', () => selectGroup(el.dataset.name));
+    });
+
+    // Update inject group dropdown
+    const sel = $('injectGroup');
+    const curVal = sel.value;
+    sel.innerHTML = '<option value="">Select group...</option>' +
+      state.groups.map(g => '<option value="' + esc(g.name) + '">' + esc(g.name) + '</option>').join('');
+    sel.value = curVal;
+  }
+
+  function renderAggView() {
+    $('aggGroupCount').textContent = state.groups.length;
+    const runner = state.runner;
+    if (runner && typeof runner === 'object') {
+      $('aggRunner').textContent = 'active:' + (runner.totalActive || 0) + ' queued:' + (runner.totalQueued || 0);
+    } else {
+      $('aggRunner').textContent = '--';
+    }
+    const courier = state.courier;
+    if (courier && typeof courier === 'object') {
+      $('aggCourier').textContent = courier.subscriptions + ' sub(s)';
+    } else {
+      $('aggCourier').textContent = '--';
+    }
+    $('aggTasks').textContent = state.tasks.length || '--';
+
+    // Health
+    const h = state.health;
+    if (h) {
+      $('aggHealthDot').className = 'health-dot ' + (h.ok ? 'ok' : 'error');
+      $('aggHealthLabel').textContent = h.ok ? 'All systems healthy' : 'Issues detected';
+    }
+  }
+
+  function renderDetail() {
+    if (!state.selectedGroup) {
+      $('aggView').style.display = '';
+      $('groupDetailView').style.display = 'none';
+      renderAggView();
+      return;
     }
 
-    function timeAgo(iso) {
-      if (!iso) return 'Never';
-      const diff = Date.now() - new Date(iso).getTime();
-      const secs = Math.floor(diff / 1000);
-      if (secs < 60) return secs + 's ago';
-      const mins = Math.floor(secs / 60);
-      if (mins < 60) return mins + 'm ago';
-      return Math.floor(mins / 60) + 'h ago';
+    $('aggView').style.display = 'none';
+    $('groupDetailView').style.display = 'flex';
+
+    const g = state.groups.find(x => x.name === state.selectedGroup);
+    if (!g) { state.selectedGroup = null; renderDetail(); return; }
+
+    $('detailGroupName').textContent = g.name;
+
+    // Overview tab
+    $('ovAgent').innerHTML = '<span class="agent-badge ' + (g.agent||'claude') + '">' + (g.agent||'claude') + '</span>';
+    $('ovChannel').textContent = g.channel || 'whatsapp';
+    $('ovTrigger').textContent = g.trigger || 'participant mode';
+    $('ovDelivery').textContent = g.schedule ? g.schedule + ' (via courier)' : 'Real-time';
+    $('ovFolders').innerHTML = (g.folders||[]).length > 0
+      ? (g.folders||[]).map(f => '<span class="folder-tag">' + esc(f) + '</span> ').join('')
+      : '<span style="color:var(--text-muted)">none</span>';
+    $('ovSenders').textContent = (g.allowedSenders||[]).length > 0
+      ? (g.allowedSenders||[]).length + ' allowed'
+      : 'all';
+    $('ovAddedAt').textContent = g.addedAt ? timeAgo(g.addedAt) : '--';
+
+    // Health
+    const h = state.health;
+    if (h) {
+      $('groupHealthDot').className = 'health-dot ' + (h.ok ? 'ok' : 'error');
+      $('groupHealthLabel').textContent = h.ok ? 'Healthy' : 'Issues detected';
+      $('groupHealthTime').textContent = h.checkedAt ? 'Checked: ' + timeAgo(h.checkedAt) : '';
     }
 
-    // ── Render ──
+    // Config tab
+    $('cfgTrigger').value = g.trigger || '';
+    $('cfgRequiresTrigger').checked = g.requiresTrigger || false;
+    $('cfgAgent').value = g.agent || 'claude';
+    $('cfgSchedule').value = g.schedule || '';
+    $('cfgFolders').value = (g.folders || []).join(', ');
+    $('cfgSystemPrompt').value = g.systemPrompt || '';
+    renderSenders(g);
 
-    function renderHeader() {
-      const badge = $('pipelineBadge');
-      const text = $('pipelineText');
-      const btn = $('startStopBtn');
+    // Tasks tab
+    renderTasks();
+  }
 
-      if (state.running) {
-        badge.className = 'pipeline-badge running';
-        text.textContent = 'Running';
-        btn.textContent = 'Stop';
-        btn.className = 'btn btn-stop';
-      } else {
-        badge.className = 'pipeline-badge stopped';
-        text.textContent = 'Stopped';
-        btn.textContent = 'Start';
-        btn.className = 'btn btn-start';
-      }
-
-      $('waStatus').textContent = state.whatsapp?.status || 'unknown';
-      $('tgStatus').textContent = state.telegram?.status || 'unknown';
-
-      const runner = state.runner;
-      if (runner && typeof runner === 'object') {
-        $('runnerStatus').textContent = 'active:' + (runner.totalActive || 0) + ' queued:' + (runner.totalQueued || 0);
-      } else {
-        $('runnerStatus').textContent = '--';
-      }
-
-      const courier = state.courier;
-      if (courier && typeof courier === 'object') {
-        $('courierStatus').textContent = courier.subscriptions + ' sub(s)';
-      } else {
-        $('courierStatus').textContent = '--';
-      }
-
-      $('groupCountStat').textContent = state.groups.length;
-
-      // Per-agent queue indicators
-      const queue = state.queue || {};
-      const qEntries = Object.entries(queue);
-      const qStat = $('queueStat');
-      const totalActive = qEntries.reduce((sum, [, q]) => sum + (q.active || 0), 0);
-      const totalDepth = qEntries.reduce((sum, [, q]) => sum + (q.depth || 0), 0);
-      if (totalActive > 0 || totalDepth > 0) {
-        qStat.style.display = '';
-        const parts = qEntries.map(([agent, q]) =>
-          agent + ':' + q.active + '/' + q.concurrency + (q.depth > 0 ? ' +' + q.depth : '')
-        );
-        $('queueDepth').textContent = parts.join(', ');
-      } else {
-        qStat.style.display = 'none';
-      }
-    }
-
-    function renderGroups() {
-      const container = $('groupCards');
-
-      if (state.groups.length === 0) {
-        container.innerHTML = '<div class="empty-state" style="padding: 40px 16px;">' +
-          '<span class="icon">&#129438;</span>' +
-          '<p>No groups registered. Click <strong>+ Register</strong> to add one.</p></div>';
-        return;
-      }
-
-      container.innerHTML = state.groups.map(g => {
-        const sel = state.selectedGroup === g.name ? ' selected' : '';
-        const agentClass = g.agent || 'claude';
-        return '<div class="group-card' + sel + '" data-name="' + escapeHtml(g.name) + '">' +
-          '<div class="group-card-header">' +
-            '<span class="group-card-name">' + escapeHtml(g.name) + '</span>' +
-            '<span class="agent-badge ' + agentClass + '">' + (g.agent || 'claude') + '</span>' +
-          '</div>' +
-          '<div class="group-card-meta">' +
-            (g.trigger ? '<span class="trigger-tag">' + escapeHtml(g.trigger) + '</span>' : '<span style="color:var(--text-muted)">participant</span>') +
-            (g.schedule ? ' <span class="schedule-badge">' + escapeHtml(g.schedule) + '</span>' : '') +
-            '<span>' + (g.folders || []).length + ' folder(s)</span>' +
-          '</div>' +
-        '</div>';
-      }).join('');
-
-      container.querySelectorAll('.group-card').forEach(el => {
-        el.addEventListener('click', () => selectGroup(el.dataset.name));
+  function renderSenders(g) {
+    const senders = g.allowedSenders || [];
+    const list = $('sendersList');
+    if (senders.length > 0) {
+      list.innerHTML = senders.map(s =>
+        '<span class="sender-tag">+' + esc(s) +
+        ' <span class="remove-sender" data-phone="' + esc(s) + '">&times;</span></span>'
+      ).join('');
+      list.querySelectorAll('.remove-sender').forEach(el => {
+        el.addEventListener('click', e => { e.stopPropagation(); removeSender(el.dataset.phone); });
       });
+    } else {
+      list.innerHTML = '<span style="color:var(--text-muted);font-size:12px;">All senders allowed</span>';
     }
+  }
 
-    function renderDetail() {
-      if (!state.selectedGroup) {
-        $('detailEmpty').style.display = 'flex';
-        $('detailContent').style.display = 'none';
-        return;
-      }
+  function renderTasks() {
+    const groupTasks = state.tasks.filter(t => {
+      if (!state.selectedGroup) return true;
+      return t.group === state.selectedGroup;
+    });
+    $('taskCount').textContent = groupTasks.length;
 
-      $('detailEmpty').style.display = 'none';
-      $('detailContent').style.display = 'flex';
-
-      const g = state.groups.find(x => x.name === state.selectedGroup);
-      if (!g) return;
-
-      $('detailGroupName').textContent = g.name;
-
-      // Populate editable form
-      $('cfgTrigger').value = g.trigger || '';
-      $('cfgRequiresTrigger').checked = g.requiresTrigger || false;
-      $('cfgAgent').value = g.agent || 'claude';
-      $('cfgSchedule').value = g.schedule || '';
-      $('cfgFolders').value = (g.folders || []).join(', ');
-      $('cfgSystemPrompt').value = g.systemPrompt || '';
-      $('cfgAddedAt').textContent = g.addedAt ? timeAgo(g.addedAt) : '--';
-      $('cfgChannel').textContent = g.channel || 'whatsapp';
-
-      // Senders
-      renderSenders(g);
-
-      // Health
-      renderHealth();
+    const container = $('taskList');
+    if (groupTasks.length === 0) {
+      container.innerHTML = '<p style="font-size:12px;color:var(--text-muted);">No scheduled tasks for this group.</p>';
+      return;
     }
+    container.innerHTML = groupTasks.map(t =>
+      '<div class="task-row">' +
+        '<span class="task-name">' + esc(t.name) + '</span>' +
+        '<span class="task-cron">' + esc(t.schedule) + '</span>' +
+        '<span class="task-next">' + (t.nextRun ? timeAgo(t.nextRun) : '--') + '</span>' +
+        '<button class="btn btn-sm btn-danger btn-ghost task-cancel" data-name="' + esc(t.name) + '">Cancel</button>' +
+      '</div>'
+    ).join('');
 
-    function renderSenders(g) {
-      const senders = g.allowedSenders || [];
-      const list = $('sendersList');
-      if (senders.length > 0) {
-        list.innerHTML = senders.map(s =>
-          '<span class="sender-tag">+' + escapeHtml(s) +
-          ' <span class="remove-sender" data-phone="' + escapeHtml(s) + '">&times;</span></span>'
-        ).join('');
-        list.querySelectorAll('.remove-sender').forEach(el => {
-          el.addEventListener('click', (e) => {
-            e.stopPropagation();
-            removeSender(el.dataset.phone);
-          });
-        });
-      } else {
-        list.innerHTML = '<span style="color: var(--text-muted); font-size: 13px;">All senders allowed</span>';
-      }
+    container.querySelectorAll('.task-cancel').forEach(el => {
+      el.addEventListener('click', () => cancelTask(el.dataset.name));
+    });
+  }
+
+  function addActivity(type, group, message) {
+    state.activityLog.unshift({ type, group, message, time: new Date().toISOString() });
+    if (state.activityLog.length > MAX_ACTIVITY) state.activityLog.pop();
+    renderActivity();
+  }
+
+  function renderActivity() {
+    const feed = $('activityFeed');
+    if (state.activityLog.length === 0) {
+      feed.innerHTML = '<div class="empty-state" style="padding:30px 12px;"><p style="font-size:11px;">Activity will appear here</p></div>';
+      return;
     }
+    feed.innerHTML = state.activityLog.map(a =>
+      '<div class="activity-item ai-' + a.type + '">' +
+        '<div class="ai-group">' + esc(a.group || '') + '</div>' +
+        '<div class="ai-msg">' + esc(a.message || '').substring(0, 200) + '</div>' +
+        '<div class="ai-time">' + timeAgo(a.time) + '</div>' +
+      '</div>'
+    ).join('');
+  }
 
-    function renderHealth() {
-      const h = state.health;
-      if (!h) {
-        $('healthDot').className = 'health-dot';
-        $('healthLabel').textContent = 'No health data';
-        $('healthTime').textContent = '';
-        return;
-      }
+  // ─── Actions ───
 
-      $('healthDot').className = 'health-dot ' + (h.ok ? 'ok' : 'error');
-      $('healthLabel').textContent = h.ok ? 'Healthy' : 'Issues detected';
-      $('healthTime').textContent = h.checkedAt ? 'Last check: ' + timeAgo(h.checkedAt) : '';
-    }
-
-    // ── Actions ──
-
-    async function loadStatus() {
-      try {
-        const raw = await window.photon.callTool('status', {});
-        const data = parseMCP(raw);
-        if (data && typeof data === 'object') {
-          // Detect renames
-          const newNames = new Set((data.groups || []).map(g => g.name));
-          if (state._prevGroupNames.size > 0) {
-            for (const oldName of state._prevGroupNames) {
-              if (!newNames.has(oldName)) {
-                for (const newName of newNames) {
-                  if (!state._prevGroupNames.has(newName)) {
-                    toast('Group renamed: ' + oldName + ' \u2192 ' + newName, 'info');
-                    if (state.selectedGroup === oldName) state.selectedGroup = newName;
-                    break;
-                  }
+  async function loadStatus() {
+    try {
+      const raw = await window.photon.callTool('status', {});
+      const data = parseMCP(raw);
+      if (data && typeof data === 'object') {
+        // Detect renames
+        const newNames = new Set((data.groups || []).map(g => g.name));
+        if (state._prevGroupNames.size > 0) {
+          for (const oldName of state._prevGroupNames) {
+            if (!newNames.has(oldName)) {
+              for (const newName of newNames) {
+                if (!state._prevGroupNames.has(newName)) {
+                  toast('Group renamed: ' + oldName + ' \u2192 ' + newName);
+                  addActivity('incoming', newName, 'Renamed from ' + oldName);
+                  if (state.selectedGroup === oldName) state.selectedGroup = newName;
+                  break;
                 }
               }
             }
           }
-          state._prevGroupNames = newNames;
-
-          state.running = data.running || false;
-          state.whatsapp = data.whatsapp || null;
-          state.telegram = data.telegram || null;
-          state.runner = data.runner || null;
-          state.courier = data.courier || null;
-          state.queue = data.queue || {};
-          state.groups = data.groups || [];
-          renderHeader();
-          renderGroups();
-          renderDetail();
         }
-      } catch (e) {
-        console.error('Status failed:', e);
-      }
-    }
+        state._prevGroupNames = newNames;
 
-    async function loadHealth() {
-      try {
-        const raw = await window.photon.callTool('health', {});
-        state.health = parseMCP(raw);
-        renderHealth();
-      } catch (e) {
-        console.error('Health failed:', e);
-      }
-    }
-
-    function selectGroup(name) {
-      state.selectedGroup = name;
-      renderGroups();
-      renderDetail();
-    }
-
-    async function togglePipeline() {
-      const btn = $('startStopBtn');
-      btn.disabled = true;
-
-      if (state.running) {
-        try {
-          await window.photon.callTool('stop', {});
-          state.running = false;
-          renderHeader();
-          toast('Pipeline stopped', 'success');
-        } catch (e) { toast('Stop failed: ' + (e.message || e), 'error'); }
-      } else {
-        btn.textContent = 'Starting...';
-        try {
-          await window.photon.callTool('start', {});
-          state.running = true;
-          renderHeader();
-          toast('Pipeline started', 'success');
-          loadStatus();
-        } catch (e) { toast('Start failed: ' + (e.message || e), 'error'); }
-      }
-      btn.disabled = false;
-      renderHeader();
-    }
-
-    async function saveGroupConfig() {
-      if (!state.selectedGroup) return;
-      const params = {
-        group: state.selectedGroup,
-        trigger: $('cfgTrigger').value,
-        requiresTrigger: $('cfgRequiresTrigger').checked,
-        agent: $('cfgAgent').value,
-        schedule: $('cfgSchedule').value,
-        folders: $('cfgFolders').value.split(',').map(s => s.trim()).filter(Boolean),
-        systemPrompt: $('cfgSystemPrompt').value,
-      };
-
-      try {
-        await window.photon.callTool('configure', params);
-        toast('Configuration saved', 'success');
-        loadStatus();
-      } catch (e) { toast('Save failed: ' + (e.message || e), 'error'); }
-    }
-
-    async function resetSession() {
-      if (!state.selectedGroup) return;
-      try {
-        await window.photon.callTool('reset', { group: state.selectedGroup });
-        toast('Session reset for ' + state.selectedGroup, 'success');
-      } catch (e) { toast('Reset failed: ' + (e.message || e), 'error'); }
-    }
-
-    async function clearLog() {
-      if (!state.selectedGroup) return;
-      try {
-        await window.photon.callTool('clear', { group: state.selectedGroup });
-        toast('Log cleared for ' + state.selectedGroup, 'success');
-      } catch (e) { toast('Clear failed: ' + (e.message || e), 'error'); }
-    }
-
-    async function unregisterGroup() {
-      if (!state.selectedGroup) return;
-      try {
-        await window.photon.callTool('unregister', { group: state.selectedGroup });
-        state.groups = state.groups.filter(g => g.name !== state.selectedGroup);
-        state.selectedGroup = null;
+        state.running = data.running || false;
+        state.whatsapp = data.whatsapp || null;
+        state.telegram = data.telegram || null;
+        state.runner = data.runner || null;
+        state.courier = data.courier || null;
+        state.queue = data.queue || {};
+        state.groups = data.groups || [];
+        renderHeader();
         renderGroups();
         renderDetail();
+      }
+    } catch (e) { console.error('Status failed:', e); }
+  }
+
+  async function loadHealth() {
+    try {
+      const raw = await window.photon.callTool('health', {});
+      state.health = parseMCP(raw);
+      renderDetail();
+    } catch (e) { console.error('Health failed:', e); }
+  }
+
+  async function loadTasks() {
+    try {
+      const raw = await window.photon.callTool('tasks', {});
+      state.tasks = parseMCP(raw) || [];
+      renderTasks();
+      renderAggView();
+    } catch (e) { console.error('Tasks failed:', e); }
+  }
+
+  function selectGroup(name) {
+    state.selectedGroup = name;
+    switchTab('overview');
+    renderGroups();
+    renderDetail();
+  }
+
+  async function togglePipeline() {
+    const btn = $('startStopBtn');
+    btn.disabled = true;
+    if (state.running) {
+      try {
+        await window.photon.callTool('stop', {});
+        state.running = false;
         renderHeader();
-        toast('Group unregistered', 'success');
-      } catch (e) { toast('Unregister failed: ' + (e.message || e), 'error'); }
-    }
-
-    async function addSender() {
-      if (!state.selectedGroup) return;
-      const phone = $('addSenderInput').value.trim();
-      if (!phone) return;
+        toast('Pipeline stopped', 'success');
+        addActivity('outgoing', '', 'Pipeline stopped');
+      } catch (e) { toast('Stop failed: ' + (e.message || e), 'error'); }
+    } else {
+      btn.textContent = 'Starting...';
       try {
-        await window.photon.callTool('allow', { group: state.selectedGroup, phone });
-        $('addSenderInput').value = '';
-        toast('Sender added', 'success');
+        await window.photon.callTool('start', {});
+        state.running = true;
+        renderHeader();
+        toast('Pipeline started', 'success');
+        addActivity('outgoing', '', 'Pipeline started');
         loadStatus();
-      } catch (e) { toast('Add sender failed: ' + (e.message || e), 'error'); }
+      } catch (e) { toast('Start failed: ' + (e.message || e), 'error'); }
     }
+    btn.disabled = false;
+    renderHeader();
+  }
 
-    async function removeSender(phone) {
-      if (!state.selectedGroup) return;
-      try {
-        await window.photon.callTool('deny', { group: state.selectedGroup, phone });
-        toast('Sender removed', 'success');
-        loadStatus();
-      } catch (e) { toast('Remove sender failed: ' + (e.message || e), 'error'); }
-    }
-
-    // ── Register Modal ──
-
-    function openRegisterModal() {
-      $('regGroup').value = '';
-      $('regChannel').value = '';
-      $('regAgent').value = 'claude';
-      $('regTrigger').value = '';
-      $('regSchedule').value = '';
-      $('regFolders').value = '';
-      $('regSystemPrompt').value = '';
-      $('registerModal').classList.add('visible');
-      $('regGroup').focus();
-    }
-
-    function closeRegisterModal() {
-      $('registerModal').classList.remove('visible');
-    }
-
-    async function submitRegister() {
-      const group = $('regGroup').value.trim();
-      if (!group) { toast('Group name is required', 'error'); return; }
-
-      const params = {
-        group,
-        trigger: $('regTrigger').value,
-        folders: $('regFolders').value.split(',').map(s => s.trim()).filter(Boolean),
-        agent: $('regAgent').value,
-        systemPrompt: $('regSystemPrompt').value,
-      };
-      const channel = $('regChannel').value;
-      if (channel) params.channel = channel;
-      const schedule = $('regSchedule').value;
-      if (schedule) params.schedule = schedule;
-
-      $('regSubmitBtn').disabled = true;
-      $('regSubmitBtn').textContent = 'Registering...';
-      try {
-        const raw = await window.photon.callTool('register', params);
-        const result = parseMCP(raw);
-        closeRegisterModal();
-        toast('Registered: ' + (result.name || group), 'success');
-        loadStatus();
-        if (result.name) selectGroup(result.name);
-      } catch (e) {
-        toast('Register failed: ' + (e.message || e), 'error');
-      }
-      $('regSubmitBtn').disabled = false;
-      $('regSubmitBtn').textContent = 'Register';
-    }
-
-    // ── Settings Modal ──
-
-    function openSettingsModal() {
-      // Populate concurrency rows
-      const agents = ['claude', 'gemini', 'aider', 'opencode', 'auto'];
-      const defaults = { claude: 2, gemini: 2, aider: 1, opencode: 1, auto: 1 };
-
-      // Try to get current settings from status queue data
-      const currentConcurrency = {};
-      for (const [agent, q] of Object.entries(state.queue || {})) {
-        if (q.concurrency) currentConcurrency[agent] = q.concurrency;
-      }
-
-      const container = $('concurrencyRows');
-      container.innerHTML = agents.map(agent => {
-        const val = currentConcurrency[agent] || defaults[agent] || 1;
-        return '<div class="concurrency-row">' +
-          '<span class="agent-name"><span class="agent-badge ' + agent + '">' + agent + '</span></span>' +
-          '<input type="number" min="1" max="10" value="' + val + '" data-agent="' + agent + '" class="concurrency-input">' +
-          '<span class="slots-label">concurrent slots</span>' +
-        '</div>';
-      }).join('');
-
-      // General settings — use cached or defaults
-      $('setAgentName').value = state._settings?.agentName || 'Lura';
-      $('setHeartbeat').value = state._settings?.heartbeatIntervalMs || 30000;
-
-      $('settingsModal').classList.add('visible');
-    }
-
-    function closeSettingsModal() {
-      $('settingsModal').classList.remove('visible');
-    }
-
-    async function saveSettings() {
-      // Build concurrency map
-      const concurrency = {};
-      document.querySelectorAll('.concurrency-input').forEach(input => {
-        concurrency[input.dataset.agent] = parseInt(input.value, 10) || 1;
-      });
-
-      // Save via photon settings API
-      const settings = {
-        agentConcurrency: concurrency,
-        agentName: $('setAgentName').value || 'Lura',
-        heartbeatIntervalMs: parseInt($('setHeartbeat').value, 10) || 30000,
-      };
-
-      try {
-        // Settings are persisted through the photon settings system
-        await window.photon.callTool('settings', settings);
-        state._settings = settings;
-        closeSettingsModal();
-        toast('Settings saved', 'success');
-        loadStatus();
-      } catch (e) {
-        toast('Save settings failed: ' + (e.message || e), 'error');
-      }
-    }
-
-    // ── Events ──
-    $('startStopBtn').addEventListener('click', togglePipeline);
-    $('refreshBtn').addEventListener('click', () => { loadStatus(); loadHealth(); });
-    $('settingsBtn').addEventListener('click', openSettingsModal);
-    $('resetBtn').addEventListener('click', resetSession);
-    $('clearLogBtn').addEventListener('click', clearLog);
-    $('unregisterBtn').addEventListener('click', unregisterGroup);
-    $('cfgSaveBtn').addEventListener('click', saveGroupConfig);
-    $('cfgRevertBtn').addEventListener('click', renderDetail);
-    $('addSenderBtn').addEventListener('click', addSender);
-    $('addSenderInput').addEventListener('keydown', e => { if (e.key === 'Enter') addSender(); });
-    $('registerBtn').addEventListener('click', openRegisterModal);
-    $('regCancelBtn').addEventListener('click', closeRegisterModal);
-    $('regSubmitBtn').addEventListener('click', submitRegister);
-    $('setCancelBtn').addEventListener('click', closeSettingsModal);
-    $('setSaveBtn').addEventListener('click', saveSettings);
-
-    // Close modals on overlay click
-    $('registerModal').addEventListener('click', e => { if (e.target === $('registerModal')) closeRegisterModal(); });
-    $('settingsModal').addEventListener('click', e => { if (e.target === $('settingsModal')) closeSettingsModal(); });
-
-    // ── Theme ──
-    if (window.photon) {
-      if (window.photon.theme === 'light') document.documentElement.classList.add('light');
-      window.photon.onThemeChange(theme => {
-        document.documentElement.classList.toggle('light', theme === 'light');
-      });
-    }
-
-    // ── onResult ──
-    if (window.photon) {
-      window.photon.onResult((result) => {
-        const data = parseMCP(result);
-        if (!data || typeof data !== 'object') return;
-        if ('running' in data && 'groups' in data) {
-          state.running = data.running || false;
-          state.whatsapp = data.whatsapp || null;
-          state.telegram = data.telegram || null;
-          state.runner = data.runner || null;
-          state.courier = data.courier || null;
-          state.queue = data.queue || {};
-          state.groups = data.groups || [];
-          renderHeader();
-          renderGroups();
-          renderDetail();
-        }
-        else if ('ok' in data && 'whatsapp' in data && 'runner' in data) {
-          state.health = data;
-          renderHealth();
-        }
-      });
-
+  async function saveGroupConfig() {
+    if (!state.selectedGroup) return;
+    const params = {
+      group: state.selectedGroup,
+      trigger: $('cfgTrigger').value,
+      requiresTrigger: $('cfgRequiresTrigger').checked,
+      agent: $('cfgAgent').value,
+      schedule: $('cfgSchedule').value,
+      folders: $('cfgFolders').value.split(',').map(s => s.trim()).filter(Boolean),
+      systemPrompt: $('cfgSystemPrompt').value,
+    };
+    try {
+      await window.photon.callTool('configure', params);
+      toast('Configuration saved', 'success');
       loadStatus();
-      loadHealth();
+    } catch (e) { toast('Save failed: ' + (e.message || e), 'error'); }
+  }
+
+  async function resetSession() {
+    if (!state.selectedGroup) return;
+    try {
+      await window.photon.callTool('reset', { group: state.selectedGroup });
+      toast('Session reset', 'success');
+    } catch (e) { toast('Reset failed: ' + (e.message || e), 'error'); }
+  }
+
+  async function clearLog() {
+    if (!state.selectedGroup) return;
+    try {
+      await window.photon.callTool('clear', { group: state.selectedGroup });
+      toast('Log cleared', 'success');
+    } catch (e) { toast('Clear failed: ' + (e.message || e), 'error'); }
+  }
+
+  async function compactMemory() {
+    if (!state.selectedGroup) return;
+    $('compactBtn').disabled = true;
+    $('compactBtn').textContent = 'Compacting...';
+    try {
+      const raw = await window.photon.callTool('compact', { group: state.selectedGroup });
+      const result = parseMCP(raw);
+      $('compactResult').style.display = '';
+      $('compactDetails').innerHTML =
+        '<div>Compacted: <strong>' + (result.compacted || 0) + '</strong> messages</div>' +
+        '<div>Decisions: <strong>' + (result.decisions || 0) + '</strong></div>' +
+        '<div>Preferences: <strong>' + (result.preferences || 0) + '</strong></div>' +
+        '<div>Rules: <strong>' + (result.rules || 0) + '</strong></div>';
+      toast('Memory compacted', 'success');
+    } catch (e) { toast('Compact failed: ' + (e.message || e), 'error'); }
+    $('compactBtn').disabled = false;
+    $('compactBtn').textContent = 'Compact Memory';
+  }
+
+  async function unregisterGroup() {
+    if (!state.selectedGroup) return;
+    const name = state.selectedGroup;
+    try {
+      await window.photon.callTool('unregister', { group: name });
+      state.groups = state.groups.filter(g => g.name !== name);
+      state.selectedGroup = null;
+      renderGroups();
+      renderDetail();
+      toast('Unregistered: ' + name, 'success');
+      addActivity('outgoing', name, 'Group unregistered');
+    } catch (e) { toast('Unregister failed: ' + (e.message || e), 'error'); }
+  }
+
+  async function addSender() {
+    if (!state.selectedGroup) return;
+    const phone = $('addSenderInput').value.trim();
+    if (!phone) return;
+    try {
+      await window.photon.callTool('allow', { group: state.selectedGroup, phone });
+      $('addSenderInput').value = '';
+      toast('Sender added', 'success');
+      loadStatus();
+    } catch (e) { toast('Add failed: ' + (e.message || e), 'error'); }
+  }
+
+  async function removeSender(phone) {
+    if (!state.selectedGroup) return;
+    try {
+      await window.photon.callTool('deny', { group: state.selectedGroup, phone });
+      toast('Sender removed', 'success');
+      loadStatus();
+    } catch (e) { toast('Remove failed: ' + (e.message || e), 'error'); }
+  }
+
+  async function createTask() {
+    if (!state.selectedGroup) return;
+    const name = $('newTaskName').value.trim();
+    const cron = $('newTaskCron').value.trim();
+    const prompt = $('newTaskPrompt').value.trim();
+    if (!cron || !prompt) { toast('Cron and prompt are required', 'error'); return; }
+    try {
+      const params = { group: state.selectedGroup, cron, prompt };
+      if (name) params.name = name;
+      await window.photon.callTool('task', params);
+      $('newTaskName').value = '';
+      $('newTaskCron').value = '';
+      $('newTaskPrompt').value = '';
+      toast('Task created', 'success');
+      loadTasks();
+    } catch (e) { toast('Create failed: ' + (e.message || e), 'error'); }
+  }
+
+  async function cancelTask(name) {
+    try {
+      await window.photon.callTool('cancel', { name });
+      toast('Task cancelled: ' + name, 'success');
+      loadTasks();
+    } catch (e) { toast('Cancel failed: ' + (e.message || e), 'error'); }
+  }
+
+  async function injectMessage() {
+    const group = $('injectGroup').value;
+    const message = $('injectMsg').value.trim();
+    if (!group) { toast('Select a group', 'error'); return; }
+    if (!message) return;
+    try {
+      await window.photon.callTool('inject', { group, message });
+      addActivity('incoming', group, '[injected] ' + message);
+      $('injectMsg').value = '';
+      toast('Message injected', 'success');
+    } catch (e) { toast('Inject failed: ' + (e.message || e), 'error'); }
+  }
+
+  // ─── Register ───
+
+  function showRegisterPanel() {
+    $('registerPanel').style.display = '';
+    $('regGroup').value = '';
+    $('regChannel').value = '';
+    $('regAgent').value = 'claude';
+    $('regTrigger').value = '';
+    $('regSchedule').value = '';
+    $('regFolders').value = '';
+    $('regSystemPrompt').value = '';
+    state.selectedGroup = null;
+    renderGroups();
+    renderDetail();
+    $('regGroup').focus();
+  }
+
+  async function submitRegister() {
+    const group = $('regGroup').value.trim();
+    if (!group) { toast('Group name required', 'error'); return; }
+    const params = {
+      group,
+      trigger: $('regTrigger').value,
+      folders: $('regFolders').value.split(',').map(s => s.trim()).filter(Boolean),
+      agent: $('regAgent').value,
+      systemPrompt: $('regSystemPrompt').value,
+    };
+    const channel = $('regChannel').value;
+    if (channel) params.channel = channel;
+    const schedule = $('regSchedule').value;
+    if (schedule) params.schedule = schedule;
+
+    $('regSubmitBtn').disabled = true;
+    $('regSubmitBtn').textContent = 'Registering...';
+    try {
+      const raw = await window.photon.callTool('register', params);
+      const result = parseMCP(raw);
+      $('registerPanel').style.display = 'none';
+      toast('Registered: ' + (result.name || group), 'success');
+      addActivity('outgoing', result.name || group, 'Group registered');
+      loadStatus();
+      if (result.name) selectGroup(result.name);
+    } catch (e) {
+      toast('Register failed: ' + (e.message || e), 'error');
     }
-  </script>
+    $('regSubmitBtn').disabled = false;
+    $('regSubmitBtn').textContent = 'Register';
+  }
+
+  // ─── Settings ───
+
+  function showSettingsPanel() {
+    const panel = $('settingsPanel');
+    panel.style.display = panel.style.display === 'none' ? '' : 'none';
+
+    const agents = ['claude', 'gemini', 'aider', 'opencode', 'auto'];
+    const defaults = { claude: 2, gemini: 2, aider: 1, opencode: 1, auto: 1 };
+    const cc = {};
+    for (const [agent, q] of Object.entries(state.queue || {})) {
+      if (q.concurrency) cc[agent] = q.concurrency;
+    }
+    $('concurrencyRows').innerHTML = agents.map(agent => {
+      const val = cc[agent] || defaults[agent] || 1;
+      return '<div class="concurrency-row">' +
+        '<span class="agent-name"><span class="agent-badge ' + agent + '">' + agent + '</span></span>' +
+        '<input type="number" min="1" max="10" value="' + val + '" data-agent="' + agent + '" class="concurrency-input">' +
+        '<span class="slots-label">slots</span></div>';
+    }).join('');
+
+    $('setAgentName').value = state._settings?.agentName || 'Lura';
+    $('setHeartbeat').value = state._settings?.heartbeatIntervalMs || 30000;
+  }
+
+  async function saveSettings() {
+    const concurrency = {};
+    document.querySelectorAll('.concurrency-input').forEach(input => {
+      concurrency[input.dataset.agent] = parseInt(input.value, 10) || 1;
+    });
+    const settings = {
+      agentConcurrency: concurrency,
+      agentName: $('setAgentName').value || 'Lura',
+      heartbeatIntervalMs: parseInt($('setHeartbeat').value, 10) || 30000,
+    };
+    try {
+      await window.photon.callTool('settings', settings);
+      state._settings = settings;
+      $('settingsPanel').style.display = 'none';
+      toast('Settings saved', 'success');
+      loadStatus();
+    } catch (e) { toast('Save failed: ' + (e.message || e), 'error'); }
+  }
+
+  // ─── Discovery ───
+
+  async function showDiscovery() {
+    const panel = $('discoveryPanel');
+    if (panel.style.display !== 'none') { panel.style.display = 'none'; return; }
+    panel.style.display = '';
+    $('discoveryBody').innerHTML = '<tr><td colspan="3" style="color:var(--text-muted)">Loading...</td></tr>';
+    try {
+      const raw = await window.photon.callTool('groups', {});
+      const groups = parseMCP(raw) || [];
+      state._discoveredGroups = groups;
+      $('discoveryBody').innerHTML = groups.map(g =>
+        '<tr class="disc-row" data-name="' + esc(g.name) + '" data-channel="' + esc(g.channel) + '">' +
+          '<td>' + esc(g.name) + '</td>' +
+          '<td>' + esc(g.channel) + '</td>' +
+          '<td><span class="reg-badge ' + (g.registered ? 'yes' : 'no') + '">' +
+            (g.registered ? 'registered' : 'available') + '</span></td>' +
+        '</tr>'
+      ).join('');
+      document.querySelectorAll('.disc-row').forEach(row => {
+        row.style.cursor = 'pointer';
+        row.addEventListener('click', () => {
+          $('discoveryPanel').style.display = 'none';
+          $('regGroup').value = row.dataset.name;
+          $('regChannel').value = row.dataset.channel;
+          showRegisterPanel();
+          $('regGroup').value = row.dataset.name;
+          $('regChannel').value = row.dataset.channel;
+        });
+      });
+    } catch (e) {
+      $('discoveryBody').innerHTML = '<tr><td colspan="3" style="color:var(--accent)">' + esc(e.message || 'Failed') + '</td></tr>';
+    }
+  }
+
+  // ─── Activity toggle ───
+
+  function toggleActivity() {
+    $('zoneActivity').classList.toggle('collapsed');
+  }
+
+  // ─── Event Bindings ───
+
+  $('startStopBtn').addEventListener('click', togglePipeline);
+  $('refreshBtn').addEventListener('click', () => { loadStatus(); loadHealth(); loadTasks(); });
+  $('registerBtn').addEventListener('click', showRegisterPanel);
+  $('regCancelBtn').addEventListener('click', () => { $('registerPanel').style.display = 'none'; });
+  $('regSubmitBtn').addEventListener('click', submitRegister);
+  $('showSettingsBtn').addEventListener('click', showSettingsPanel);
+  $('setCancelBtn').addEventListener('click', () => { $('settingsPanel').style.display = 'none'; });
+  $('setSaveBtn').addEventListener('click', saveSettings);
+  $('showDiscoveryBtn').addEventListener('click', showDiscovery);
+  $('activityToggle').addEventListener('click', toggleActivity);
+  $('clearActivityBtn').addEventListener('click', () => { state.activityLog = []; renderActivity(); });
+  $('unregisterBtn').addEventListener('click', unregisterGroup);
+  $('cfgSaveBtn').addEventListener('click', saveGroupConfig);
+  $('cfgRevertBtn').addEventListener('click', renderDetail);
+  $('addSenderBtn').addEventListener('click', addSender);
+  $('addSenderInput').addEventListener('keydown', e => { if (e.key === 'Enter') addSender(); });
+  $('resetBtn').addEventListener('click', resetSession);
+  $('clearLogBtn').addEventListener('click', clearLog);
+  $('compactBtn').addEventListener('click', compactMemory);
+  $('createTaskBtn').addEventListener('click', createTask);
+  $('injectBtn').addEventListener('click', injectMessage);
+  $('injectMsg').addEventListener('keydown', e => { if (e.key === 'Enter') injectMessage(); });
+
+  // Deselect group when clicking aggregate view buttons
+  $('aggView').addEventListener('click', e => {
+    if (e.target.closest('#registerPanel, #settingsPanel, #discoveryPanel')) return;
+  });
+
+  // ─── Theme ───
+  if (window.photon) {
+    if (window.photon.theme === 'light') document.documentElement.classList.add('light');
+    window.photon.onThemeChange(theme => {
+      document.documentElement.classList.toggle('light', theme === 'light');
+    });
+  }
+
+  // ─── onResult live feed ───
+  if (window.photon) {
+    window.photon.onResult((result) => {
+      const data = parseMCP(result);
+      if (!data || typeof data !== 'object') return;
+
+      // Status update
+      if ('running' in data && 'groups' in data) {
+        state.running = data.running || false;
+        state.whatsapp = data.whatsapp || null;
+        state.telegram = data.telegram || null;
+        state.runner = data.runner || null;
+        state.courier = data.courier || null;
+        state.queue = data.queue || {};
+        state.groups = data.groups || [];
+        renderHeader();
+        renderGroups();
+        renderDetail();
+      }
+      // Health update
+      else if ('ok' in data && 'whatsapp' in data && 'runner' in data) {
+        state.health = data;
+        renderDetail();
+      }
+      // Activity from pipeline events
+      if (data._activity) {
+        addActivity(data._activity.type || 'incoming', data._activity.group || '', data._activity.message || '');
+      }
+    });
+
+    loadStatus();
+    loadHealth();
+    loadTasks();
+  }
+</script>
 </body>
 </html>
