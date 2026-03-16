@@ -14,6 +14,7 @@ import { Photon } from '@portel/photon-core';
  * @icon 🦞
  * @tags orchestrator, whatsapp, telegram, agent, claw
  * @stateful
+ * @noworker
  * @photon whatsapp ./whatsapp.photon.ts
  * @photon telegram ./telegram.photon.ts
  * @photon router ./agent-router.photon.ts
@@ -1190,7 +1191,6 @@ export default class Claw extends Photon {
    *
    * @title Compact Memory
    * @param group Group name (partial match) {@example "Arul and Lura"}
-   * @internal
    */
   async compact(params: { group: string }): Promise<{ compacted: number; decisions: number; preferences: number; rules: number }> {
     const query = params.group.toLowerCase();
