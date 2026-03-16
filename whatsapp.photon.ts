@@ -14,10 +14,10 @@ import makeWASocket, {
 
 import { Photon } from '@portel/photon-core';
 
-// Logger is initialized lazily to respect the settings.debug flag.
-// Use 'fatal' instead of 'silent' — Baileys internally checks logger.level
-// and some code paths bypass 'silent' by writing to child loggers.
-const silentLogger = pino({ level: 'fatal' });
+// Baileys child loggers bypass level checks and write to stdout.
+// Use a /dev/null destination to fully suppress all output.
+const devNull = fs.createWriteStream('/dev/null');
+const silentLogger = pino({ level: 'fatal' }, devNull);
 const debugLogger = pino({ level: 'debug' });
 
 /** Max age for queued messages before they're dropped on flush (1 hour) */
