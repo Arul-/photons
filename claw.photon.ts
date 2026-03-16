@@ -1607,11 +1607,9 @@ export default class Claw extends Photon {
     }) + '\n';
     await fs.promises.appendFile(logPath, logEntry);
 
-    // Enforce conversation limit — keep last N conversations
-    await this._trimConversations(convPath);
   }
 
-  /** Keep only the last maxConversations entries in conversation.md */
+  /** Keep only the last maxConversations entries in conversation.md (called after compaction) */
   private async _trimConversations(convPath: string): Promise<void> {
     const content = await fs.promises.readFile(convPath, 'utf-8');
     const sections = content.split(/^## /m).filter(s => s.trim());
@@ -1769,8 +1767,8 @@ Respond in EXACTLY this format (include all three sections even if empty):
       await fs.promises.writeFile(bucketPath, updated);
     }
 
-    // Reset conversation.md — keep only the header
-    await fs.promises.writeFile(convPath, '# Conversation History\n\n');
+    // Trim conversation.md — keep last N entries, discard compacted ones
+    await this._trimConversations(convPath);
 
     const total = counts.decisions + counts.preferences + counts.rules;
     this.emit({ type: 'compacted', group: name, folder: primaryFolder, ...counts, total });
