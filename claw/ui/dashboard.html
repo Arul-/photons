@@ -107,11 +107,14 @@
     }
     .btn:hover { background: var(--border-color); }
     .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary { background: var(--blue); color: #fff; border-color: var(--blue); }
+    .btn-primary:hover { background: #2563eb; }
     .btn-start { background: var(--green); color: #fff; border-color: var(--green); }
     .btn-start:hover { background: #0ea472; }
     .btn-stop { background: var(--accent-dim); color: var(--accent); border-color: transparent; }
     .btn-stop:hover { background: var(--accent); color: #fff; }
     .btn-sm { padding: 4px 10px; font-size: 12px; }
+    .btn-icon { padding: 6px 8px; font-size: 16px; line-height: 1; }
 
     /* ── Stats ── */
     .stats-bar {
@@ -131,14 +134,16 @@
     .group-list {
       width: 320px; border-right: 1px solid var(--border-color);
       background: var(--bg-secondary); display: flex; flex-direction: column; flex-shrink: 0;
-      overflow-y: auto;
     }
 
     .group-list-header {
       padding: 10px 12px; border-bottom: 1px solid var(--border-color);
       font-size: 12px; font-weight: 600; text-transform: uppercase;
       letter-spacing: 0.5px; color: var(--text-muted);
+      display: flex; align-items: center; justify-content: space-between;
     }
+
+    .group-list-body { flex: 1; overflow-y: auto; }
 
     .group-card {
       padding: 12px; border-bottom: 1px solid var(--border-color);
@@ -164,6 +169,7 @@
     .agent-badge.gemini { background: var(--blue-dim); color: var(--blue); }
     .agent-badge.aider { background: var(--purple-dim); color: var(--purple); }
     .agent-badge.auto { background: var(--yellow-dim); color: var(--yellow); }
+    .agent-badge.opencode { background: var(--green-dim); color: var(--green); }
 
     .group-card-meta {
       display: flex; gap: 10px; font-size: 12px; color: var(--text-muted);
@@ -208,23 +214,44 @@
 
     .config-value { font-size: 14px; font-weight: 500; }
 
-    .folder-list {
-      display: flex; flex-wrap: wrap; gap: 4px;
-    }
+    .folder-list { display: flex; flex-wrap: wrap; gap: 4px; }
 
     .folder-tag {
       font-size: 12px; background: var(--blue-dim); color: var(--blue);
       padding: 2px 8px; border-radius: 4px;
     }
 
-    .sender-list {
-      display: flex; flex-wrap: wrap; gap: 4px;
-    }
+    .sender-list { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 
     .sender-tag {
       font-size: 12px; background: var(--bg-tertiary);
       padding: 2px 8px; border-radius: 4px; color: var(--text-secondary);
+      display: inline-flex; align-items: center; gap: 4px;
     }
+    .sender-tag .remove-sender {
+      cursor: pointer; opacity: 0.5; font-size: 14px; line-height: 1;
+    }
+    .sender-tag .remove-sender:hover { opacity: 1; color: var(--accent); }
+
+    /* ── Form Elements ── */
+    .form-input, .form-select, .form-textarea {
+      width: 100%; padding: 6px 10px; border-radius: 6px;
+      border: 1px solid var(--border-color); background: var(--bg-tertiary);
+      color: var(--text-primary); font-size: 13px; font-family: inherit;
+      outline: none; transition: border-color 0.15s;
+    }
+    .form-input:focus, .form-select:focus, .form-textarea:focus {
+      border-color: var(--blue);
+    }
+    .form-textarea { resize: vertical; min-height: 60px; }
+    .form-select { cursor: pointer; }
+    .form-row { margin-bottom: 12px; }
+    .form-row label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.3px; }
+    .form-row-inline { display: flex; gap: 8px; align-items: flex-end; }
+    .form-row-inline .form-row { flex: 1; margin-bottom: 0; }
+    .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+    .form-check { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+    .form-check input { cursor: pointer; }
 
     /* ── Health Panel ── */
     .health-panel {
@@ -237,17 +264,11 @@
       text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted);
     }
 
-    .health-grid {
-      display: flex; gap: 16px;
-    }
+    .health-grid { display: flex; gap: 16px; }
 
-    .health-item {
-      display: flex; align-items: center; gap: 8px; font-size: 13px;
-    }
+    .health-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 
-    .health-dot {
-      width: 10px; height: 10px; border-radius: 50%;
-    }
+    .health-dot { width: 10px; height: 10px; border-radius: 50%; }
     .health-dot.ok { background: var(--green); }
     .health-dot.warn { background: var(--yellow); }
     .health-dot.error { background: var(--accent); }
@@ -259,6 +280,43 @@
     }
     .empty-state .icon { font-size: 48px; opacity: 0.5; }
     .empty-state p { font-size: 14px; text-align: center; max-width: 320px; line-height: 1.5; }
+
+    /* ── Modal Overlay ── */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 200; opacity: 0; pointer-events: none; transition: opacity 0.2s;
+    }
+    .modal-overlay.visible { opacity: 1; pointer-events: auto; }
+
+    .modal {
+      background: var(--bg-secondary); border: 1px solid var(--border-color);
+      border-radius: 12px; padding: 20px; min-width: 420px; max-width: 520px;
+      max-height: 80vh; overflow-y: auto;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    }
+    .modal h3 { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
+
+    /* ── Settings Panel ── */
+    .settings-section {
+      background: var(--bg-card); border: 1px solid var(--border-color);
+      border-radius: 8px; padding: 14px; margin-bottom: 16px;
+    }
+    .settings-section h4 {
+      font-size: 12px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 10px;
+    }
+    .concurrency-row {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+      font-size: 13px;
+    }
+    .concurrency-row .agent-name { width: 80px; font-weight: 500; }
+    .concurrency-row input[type="number"] {
+      width: 60px; padding: 4px 8px; border-radius: 4px;
+      border: 1px solid var(--border-color); background: var(--bg-tertiary);
+      color: var(--text-primary); font-size: 13px; text-align: center;
+    }
+    .concurrency-row .slots-label { color: var(--text-muted); font-size: 12px; }
 
     /* ── Toast ── */
     .toast {
@@ -289,6 +347,7 @@
       </div>
     </div>
     <div class="header-actions">
+      <button class="btn btn-icon" id="settingsBtn" title="Settings">&#9881;</button>
       <button class="btn" id="refreshBtn">Refresh</button>
       <button class="btn btn-start" id="startStopBtn">Start</button>
     </div>
@@ -298,8 +357,8 @@
   <div class="stats-bar">
     <div class="stat"><span class="dot" style="background:var(--green)"></span> WhatsApp <span class="value" id="waStatus">unknown</span></div>
     <div class="stat"><span class="dot" style="background:var(--blue)"></span> Telegram <span class="value" id="tgStatus">unknown</span></div>
-    <div class="stat">Runner <span class="value" id="runnerStatus">—</span></div>
-    <div class="stat">Courier <span class="value" id="courierStatus">—</span></div>
+    <div class="stat">Runner <span class="value" id="runnerStatus">--</span></div>
+    <div class="stat">Courier <span class="value" id="courierStatus">--</span></div>
     <div class="stat">Groups <span class="value" id="groupCountStat">0</span></div>
     <div class="stat" id="queueStat" style="display:none">Queue <span class="value" id="queueDepth">0</span></div>
   </div>
@@ -308,11 +367,14 @@
   <div class="main">
     <!-- Group List -->
     <div class="group-list">
-      <div class="group-list-header">Registered Groups</div>
-      <div id="groupCards">
+      <div class="group-list-header">
+        <span>Registered Groups</span>
+        <button class="btn btn-sm btn-primary" id="registerBtn">+ Register</button>
+      </div>
+      <div class="group-list-body" id="groupCards">
         <div class="empty-state" style="padding: 40px 16px;">
-          <span class="icon">🦞</span>
-          <p>No groups registered. Use <code>claw register</code> to add groups.</p>
+          <span class="icon">&#129438;</span>
+          <p>No groups registered. Click <strong>+ Register</strong> to add one.</p>
         </div>
       </div>
     </div>
@@ -320,8 +382,8 @@
     <!-- Detail Panel -->
     <div class="detail" id="detailPanel">
       <div class="empty-state" id="detailEmpty">
-        <span class="icon">🦞</span>
-        <p>Select a group to view its configuration and controls</p>
+        <span class="icon">&#129438;</span>
+        <p>Select a group to view and edit its configuration</p>
       </div>
 
       <div id="detailContent" style="display: none;">
@@ -344,15 +406,165 @@
             </div>
           </div>
 
-          <!-- Config -->
-          <div class="config-grid" id="configGrid"></div>
+          <!-- Editable Config -->
+          <div id="editConfigForm">
+            <div class="form-row-inline">
+              <div class="form-row">
+                <label>Trigger</label>
+                <input type="text" class="form-input" id="cfgTrigger" placeholder="e.g. @ (empty = participant mode)">
+              </div>
+              <div class="form-row">
+                <label style="visibility:hidden">_</label>
+                <label class="form-check">
+                  <input type="checkbox" id="cfgRequiresTrigger"> Requires trigger
+                </label>
+              </div>
+            </div>
 
-          <!-- Senders -->
-          <div class="config-item" style="margin-bottom: 20px;" id="sendersSection">
-            <div class="config-label">Allowed Senders</div>
-            <div class="sender-list" id="sendersList"></div>
+            <div class="form-row-inline">
+              <div class="form-row">
+                <label>Agent</label>
+                <select class="form-select" id="cfgAgent">
+                  <option value="claude">claude</option>
+                  <option value="gemini">gemini</option>
+                  <option value="aider">aider</option>
+                  <option value="opencode">opencode</option>
+                  <option value="auto">auto</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label>Delivery Schedule</label>
+                <select class="form-select" id="cfgSchedule">
+                  <option value="">Real-time (no schedule)</option>
+                  <option value="@5m">@5m</option>
+                  <option value="@15m">@15m</option>
+                  <option value="@30m">@30m</option>
+                  <option value="@hourly">@hourly</option>
+                  <option value="@daily">@daily</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <label>Folders <span style="font-weight:normal;text-transform:none">(comma-separated)</span></label>
+              <input type="text" class="form-input" id="cfgFolders" placeholder="e.g. lura, photon">
+            </div>
+
+            <div class="form-row">
+              <label>System Prompt</label>
+              <textarea class="form-textarea" id="cfgSystemPrompt" placeholder="Optional system prompt for this group's agent..."></textarea>
+            </div>
+
+            <!-- Senders -->
+            <div class="form-row">
+              <label>Allowed Senders</label>
+              <div class="sender-list" id="sendersList"></div>
+              <div class="form-row-inline" style="margin-top: 6px;">
+                <input type="text" class="form-input" id="addSenderInput" placeholder="+60123456789" style="flex:1">
+                <button class="btn btn-sm" id="addSenderBtn">Add</button>
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <button class="btn btn-sm" id="cfgRevertBtn">Revert</button>
+              <button class="btn btn-sm btn-primary" id="cfgSaveBtn">Save Changes</button>
+            </div>
+          </div>
+
+          <!-- Read-only info -->
+          <div style="margin-top: 12px; font-size: 12px; color: var(--text-muted);">
+            Added: <span id="cfgAddedAt">--</span> &middot; Channel: <span id="cfgChannel">--</span>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Register Modal -->
+  <div class="modal-overlay" id="registerModal">
+    <div class="modal">
+      <h3>Register Group</h3>
+      <div class="form-row">
+        <label>Group Name</label>
+        <input type="text" class="form-input" id="regGroup" placeholder="Group name or chat ID (partial match)">
+      </div>
+      <div class="form-row-inline">
+        <div class="form-row">
+          <label>Channel</label>
+          <select class="form-select" id="regChannel">
+            <option value="">Auto-detect</option>
+            <option value="whatsapp">WhatsApp</option>
+            <option value="telegram">Telegram</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Agent</label>
+          <select class="form-select" id="regAgent">
+            <option value="claude">claude</option>
+            <option value="gemini">gemini</option>
+            <option value="aider">aider</option>
+            <option value="opencode">opencode</option>
+            <option value="auto">auto</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row-inline">
+        <div class="form-row">
+          <label>Trigger</label>
+          <input type="text" class="form-input" id="regTrigger" placeholder="e.g. @">
+        </div>
+        <div class="form-row">
+          <label>Schedule</label>
+          <select class="form-select" id="regSchedule">
+            <option value="">Real-time</option>
+            <option value="@5m">@5m</option>
+            <option value="@15m">@15m</option>
+            <option value="@30m">@30m</option>
+            <option value="@hourly">@hourly</option>
+            <option value="@daily">@daily</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <label>Folders <span style="font-weight:normal;text-transform:none">(comma-separated)</span></label>
+        <input type="text" class="form-input" id="regFolders" placeholder="e.g. lura, photon">
+      </div>
+      <div class="form-row">
+        <label>System Prompt</label>
+        <textarea class="form-textarea" id="regSystemPrompt" placeholder="Optional..."></textarea>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-sm" id="regCancelBtn">Cancel</button>
+        <button class="btn btn-sm btn-primary" id="regSubmitBtn">Register</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div class="modal-overlay" id="settingsModal">
+    <div class="modal">
+      <h3>Pipeline Settings</h3>
+      <div class="settings-section">
+        <h4>Agent Concurrency</h4>
+        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px;">
+          Max parallel tasks per agent. Independent queues: a busy claude won't block gemini.
+        </p>
+        <div id="concurrencyRows"></div>
+      </div>
+      <div class="settings-section">
+        <h4>General</h4>
+        <div class="form-row">
+          <label>Agent Name Prefix</label>
+          <input type="text" class="form-input" id="setAgentName" placeholder="Lura">
+        </div>
+        <div class="form-row">
+          <label>Heartbeat Interval (ms)</label>
+          <input type="number" class="form-input" id="setHeartbeat" min="5000" step="5000">
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-sm" id="setCancelBtn">Close</button>
+        <button class="btn btn-sm btn-primary" id="setSaveBtn">Save Settings</button>
       </div>
     </div>
   </div>
@@ -372,6 +584,7 @@
       health: null,
       selectedGroup: null,
       _prevGroupNames: new Set(),
+      _settings: null, // cached settings from photon
     };
 
     const $ = id => document.getElementById(id);
@@ -426,24 +639,21 @@
         btn.className = 'btn btn-start';
       }
 
-      const waStatus = state.whatsapp?.status || 'unknown';
-      $('waStatus').textContent = waStatus;
-
-      const tgStatus = state.telegram?.status || 'unknown';
-      $('tgStatus').textContent = tgStatus;
+      $('waStatus').textContent = state.whatsapp?.status || 'unknown';
+      $('tgStatus').textContent = state.telegram?.status || 'unknown';
 
       const runner = state.runner;
       if (runner && typeof runner === 'object') {
         $('runnerStatus').textContent = 'active:' + (runner.totalActive || 0) + ' queued:' + (runner.totalQueued || 0);
       } else {
-        $('runnerStatus').textContent = '—';
+        $('runnerStatus').textContent = '--';
       }
 
       const courier = state.courier;
       if (courier && typeof courier === 'object') {
         $('courierStatus').textContent = courier.subscriptions + ' sub(s)';
       } else {
-        $('courierStatus').textContent = '—';
+        $('courierStatus').textContent = '--';
       }
 
       $('groupCountStat').textContent = state.groups.length;
@@ -470,8 +680,8 @@
 
       if (state.groups.length === 0) {
         container.innerHTML = '<div class="empty-state" style="padding: 40px 16px;">' +
-          '<span class="icon">🦞</span>' +
-          '<p>No groups registered. Use <code>claw register</code> to add groups.</p></div>';
+          '<span class="icon">&#129438;</span>' +
+          '<p>No groups registered. Click <strong>+ Register</strong> to add one.</p></div>';
         return;
       }
 
@@ -484,7 +694,7 @@
             '<span class="agent-badge ' + agentClass + '">' + (g.agent || 'claude') + '</span>' +
           '</div>' +
           '<div class="group-card-meta">' +
-            (g.trigger ? '<span class="trigger-tag">' + escapeHtml(g.trigger) + '</span>' : '<span style="color:var(--text-muted)">participant mode</span>') +
+            (g.trigger ? '<span class="trigger-tag">' + escapeHtml(g.trigger) + '</span>' : '<span style="color:var(--text-muted)">participant</span>') +
             (g.schedule ? ' <span class="schedule-badge">' + escapeHtml(g.schedule) + '</span>' : '') +
             '<span>' + (g.folders || []).length + ' folder(s)</span>' +
           '</div>' +
@@ -511,28 +721,40 @@
 
       $('detailGroupName').textContent = g.name;
 
-      // Config grid
-      const folders = (g.folders || []).map(f => '<span class="folder-tag">' + escapeHtml(f) + '</span>').join('');
-      $('configGrid').innerHTML =
-        '<div class="config-item"><div class="config-label">Trigger</div><div class="config-value">' +
-          (g.trigger ? '<span class="trigger-tag">' + escapeHtml(g.trigger) + '</span>' + (g.requiresTrigger ? ' (required)' : ' (optional)') : 'Participant mode (no trigger)') +
-        '</div></div>' +
-        '<div class="config-item"><div class="config-label">Agent</div><div class="config-value"><span class="agent-badge ' + (g.agent || 'claude') + '">' + (g.agent || 'claude') + '</span></div></div>' +
-        '<div class="config-item"><div class="config-label">Folders</div><div class="config-value"><div class="folder-list">' + (folders || '<span style="color:var(--text-muted)">None</span>') + '</div></div></div>' +
-        '<div class="config-item"><div class="config-label">Delivery</div><div class="config-value">' +
-          (g.schedule ? '<span class="schedule-badge">' + escapeHtml(g.schedule) + '</span> (via courier)' : 'Real-time') +
-        '</div></div>' +
-        '<div class="config-item"><div class="config-label">Added</div><div class="config-value">' + (g.addedAt ? timeAgo(g.addedAt) : '—') + '</div></div>' +
-        (g.systemPrompt ? '<div class="config-item" style="grid-column: span 2;"><div class="config-label">System Prompt</div><div class="config-value" style="font-size: 13px; color: var(--text-secondary); line-height: 1.4;">' + escapeHtml(g.systemPrompt) + '</div></div>' : '');
+      // Populate editable form
+      $('cfgTrigger').value = g.trigger || '';
+      $('cfgRequiresTrigger').checked = g.requiresTrigger || false;
+      $('cfgAgent').value = g.agent || 'claude';
+      $('cfgSchedule').value = g.schedule || '';
+      $('cfgFolders').value = (g.folders || []).join(', ');
+      $('cfgSystemPrompt').value = g.systemPrompt || '';
+      $('cfgAddedAt').textContent = g.addedAt ? timeAgo(g.addedAt) : '--';
+      $('cfgChannel').textContent = g.channel || 'whatsapp';
 
       // Senders
-      const senders = (g.allowedSenders || []);
-      $('sendersList').innerHTML = senders.length > 0
-        ? senders.map(s => '<span class="sender-tag">+' + s + '</span>').join('')
-        : '<span style="color: var(--text-muted); font-size: 13px;">All senders allowed</span>';
+      renderSenders(g);
 
       // Health
       renderHealth();
+    }
+
+    function renderSenders(g) {
+      const senders = g.allowedSenders || [];
+      const list = $('sendersList');
+      if (senders.length > 0) {
+        list.innerHTML = senders.map(s =>
+          '<span class="sender-tag">+' + escapeHtml(s) +
+          ' <span class="remove-sender" data-phone="' + escapeHtml(s) + '">&times;</span></span>'
+        ).join('');
+        list.querySelectorAll('.remove-sender').forEach(el => {
+          el.addEventListener('click', (e) => {
+            e.stopPropagation();
+            removeSender(el.dataset.phone);
+          });
+        });
+      } else {
+        list.innerHTML = '<span style="color: var(--text-muted); font-size: 13px;">All senders allowed</span>';
+      }
     }
 
     function renderHealth() {
@@ -556,15 +778,14 @@
         const raw = await window.photon.callTool('status', {});
         const data = parseMCP(raw);
         if (data && typeof data === 'object') {
-          // Detect renames before updating state
+          // Detect renames
           const newNames = new Set((data.groups || []).map(g => g.name));
           if (state._prevGroupNames.size > 0) {
             for (const oldName of state._prevGroupNames) {
               if (!newNames.has(oldName)) {
-                // Old name gone — check if a new name appeared
                 for (const newName of newNames) {
                   if (!state._prevGroupNames.has(newName)) {
-                    toast('Group renamed: ' + oldName + ' → ' + newName, 'info');
+                    toast('Group renamed: ' + oldName + ' \u2192 ' + newName, 'info');
                     if (state.selectedGroup === oldName) state.selectedGroup = newName;
                     break;
                   }
@@ -624,11 +845,30 @@
           state.running = true;
           renderHeader();
           toast('Pipeline started', 'success');
-          loadStatus(); // refresh group data
+          loadStatus();
         } catch (e) { toast('Start failed: ' + (e.message || e), 'error'); }
       }
       btn.disabled = false;
       renderHeader();
+    }
+
+    async function saveGroupConfig() {
+      if (!state.selectedGroup) return;
+      const params = {
+        group: state.selectedGroup,
+        trigger: $('cfgTrigger').value,
+        requiresTrigger: $('cfgRequiresTrigger').checked,
+        agent: $('cfgAgent').value,
+        schedule: $('cfgSchedule').value,
+        folders: $('cfgFolders').value.split(',').map(s => s.trim()).filter(Boolean),
+        systemPrompt: $('cfgSystemPrompt').value,
+      };
+
+      try {
+        await window.photon.callTool('configure', params);
+        toast('Configuration saved', 'success');
+        loadStatus();
+      } catch (e) { toast('Save failed: ' + (e.message || e), 'error'); }
     }
 
     async function resetSession() {
@@ -660,12 +900,157 @@
       } catch (e) { toast('Unregister failed: ' + (e.message || e), 'error'); }
     }
 
+    async function addSender() {
+      if (!state.selectedGroup) return;
+      const phone = $('addSenderInput').value.trim();
+      if (!phone) return;
+      try {
+        await window.photon.callTool('allow', { group: state.selectedGroup, phone });
+        $('addSenderInput').value = '';
+        toast('Sender added', 'success');
+        loadStatus();
+      } catch (e) { toast('Add sender failed: ' + (e.message || e), 'error'); }
+    }
+
+    async function removeSender(phone) {
+      if (!state.selectedGroup) return;
+      try {
+        await window.photon.callTool('deny', { group: state.selectedGroup, phone });
+        toast('Sender removed', 'success');
+        loadStatus();
+      } catch (e) { toast('Remove sender failed: ' + (e.message || e), 'error'); }
+    }
+
+    // ── Register Modal ──
+
+    function openRegisterModal() {
+      $('regGroup').value = '';
+      $('regChannel').value = '';
+      $('regAgent').value = 'claude';
+      $('regTrigger').value = '';
+      $('regSchedule').value = '';
+      $('regFolders').value = '';
+      $('regSystemPrompt').value = '';
+      $('registerModal').classList.add('visible');
+      $('regGroup').focus();
+    }
+
+    function closeRegisterModal() {
+      $('registerModal').classList.remove('visible');
+    }
+
+    async function submitRegister() {
+      const group = $('regGroup').value.trim();
+      if (!group) { toast('Group name is required', 'error'); return; }
+
+      const params = {
+        group,
+        trigger: $('regTrigger').value,
+        folders: $('regFolders').value.split(',').map(s => s.trim()).filter(Boolean),
+        agent: $('regAgent').value,
+        systemPrompt: $('regSystemPrompt').value,
+      };
+      const channel = $('regChannel').value;
+      if (channel) params.channel = channel;
+      const schedule = $('regSchedule').value;
+      if (schedule) params.schedule = schedule;
+
+      $('regSubmitBtn').disabled = true;
+      $('regSubmitBtn').textContent = 'Registering...';
+      try {
+        const raw = await window.photon.callTool('register', params);
+        const result = parseMCP(raw);
+        closeRegisterModal();
+        toast('Registered: ' + (result.name || group), 'success');
+        loadStatus();
+        if (result.name) selectGroup(result.name);
+      } catch (e) {
+        toast('Register failed: ' + (e.message || e), 'error');
+      }
+      $('regSubmitBtn').disabled = false;
+      $('regSubmitBtn').textContent = 'Register';
+    }
+
+    // ── Settings Modal ──
+
+    function openSettingsModal() {
+      // Populate concurrency rows
+      const agents = ['claude', 'gemini', 'aider', 'opencode', 'auto'];
+      const defaults = { claude: 2, gemini: 2, aider: 1, opencode: 1, auto: 1 };
+
+      // Try to get current settings from status queue data
+      const currentConcurrency = {};
+      for (const [agent, q] of Object.entries(state.queue || {})) {
+        if (q.concurrency) currentConcurrency[agent] = q.concurrency;
+      }
+
+      const container = $('concurrencyRows');
+      container.innerHTML = agents.map(agent => {
+        const val = currentConcurrency[agent] || defaults[agent] || 1;
+        return '<div class="concurrency-row">' +
+          '<span class="agent-name"><span class="agent-badge ' + agent + '">' + agent + '</span></span>' +
+          '<input type="number" min="1" max="10" value="' + val + '" data-agent="' + agent + '" class="concurrency-input">' +
+          '<span class="slots-label">concurrent slots</span>' +
+        '</div>';
+      }).join('');
+
+      // General settings — use cached or defaults
+      $('setAgentName').value = state._settings?.agentName || 'Lura';
+      $('setHeartbeat').value = state._settings?.heartbeatIntervalMs || 30000;
+
+      $('settingsModal').classList.add('visible');
+    }
+
+    function closeSettingsModal() {
+      $('settingsModal').classList.remove('visible');
+    }
+
+    async function saveSettings() {
+      // Build concurrency map
+      const concurrency = {};
+      document.querySelectorAll('.concurrency-input').forEach(input => {
+        concurrency[input.dataset.agent] = parseInt(input.value, 10) || 1;
+      });
+
+      // Save via photon settings API
+      const settings = {
+        agentConcurrency: concurrency,
+        agentName: $('setAgentName').value || 'Lura',
+        heartbeatIntervalMs: parseInt($('setHeartbeat').value, 10) || 30000,
+      };
+
+      try {
+        // Settings are persisted through the photon settings system
+        await window.photon.callTool('settings', settings);
+        state._settings = settings;
+        closeSettingsModal();
+        toast('Settings saved', 'success');
+        loadStatus();
+      } catch (e) {
+        toast('Save settings failed: ' + (e.message || e), 'error');
+      }
+    }
+
     // ── Events ──
     $('startStopBtn').addEventListener('click', togglePipeline);
     $('refreshBtn').addEventListener('click', () => { loadStatus(); loadHealth(); });
+    $('settingsBtn').addEventListener('click', openSettingsModal);
     $('resetBtn').addEventListener('click', resetSession);
     $('clearLogBtn').addEventListener('click', clearLog);
     $('unregisterBtn').addEventListener('click', unregisterGroup);
+    $('cfgSaveBtn').addEventListener('click', saveGroupConfig);
+    $('cfgRevertBtn').addEventListener('click', renderDetail);
+    $('addSenderBtn').addEventListener('click', addSender);
+    $('addSenderInput').addEventListener('keydown', e => { if (e.key === 'Enter') addSender(); });
+    $('registerBtn').addEventListener('click', openRegisterModal);
+    $('regCancelBtn').addEventListener('click', closeRegisterModal);
+    $('regSubmitBtn').addEventListener('click', submitRegister);
+    $('setCancelBtn').addEventListener('click', closeSettingsModal);
+    $('setSaveBtn').addEventListener('click', saveSettings);
+
+    // Close modals on overlay click
+    $('registerModal').addEventListener('click', e => { if (e.target === $('registerModal')) closeRegisterModal(); });
+    $('settingsModal').addEventListener('click', e => { if (e.target === $('settingsModal')) closeSettingsModal(); });
 
     // ── Theme ──
     if (window.photon) {
@@ -680,7 +1065,6 @@
       window.photon.onResult((result) => {
         const data = parseMCP(result);
         if (!data || typeof data !== 'object') return;
-        // Status result
         if ('running' in data && 'groups' in data) {
           state.running = data.running || false;
           state.whatsapp = data.whatsapp || null;
@@ -693,7 +1077,6 @@
           renderGroups();
           renderDetail();
         }
-        // Health result
         else if ('ok' in data && 'whatsapp' in data && 'runner' in data) {
           state.health = data;
           renderHealth();
