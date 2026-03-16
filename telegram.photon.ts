@@ -111,7 +111,7 @@ export default class Telegram extends Photon {
         if (entry.filter?.schedule) {
           const intervalMs = _parseSchedule(entry.filter.schedule);
           entry._timer = setInterval(() => {
-            if (!this._connected) return;
+            if (!this._connected || this._polling) return;
             this._fetchOnce().catch(() => {});
           }, intervalMs);
         }
@@ -465,11 +465,12 @@ export default class Telegram extends Photon {
     if (filter?.schedule) {
       const intervalMs = _parseSchedule(filter.schedule);
       entry._timer = setInterval(() => {
-        if (!this._connected) return;
+        // Skip if disconnected or if real-time polling already covers delivery
+        if (!this._connected || this._polling) return;
         this._fetchOnce().catch(() => {});
       }, intervalMs);
-      // Also do an immediate fetch
-      if (this._connected) this._fetchOnce().catch(() => {});
+      // Also do an immediate fetch (only if polling isn't active)
+      if (this._connected && !this._polling) this._fetchOnce().catch(() => {});
     }
 
     this._eventListeners.push(entry);
