@@ -283,12 +283,18 @@ export default class Claw extends Photon {
       const match = tgChats.find((g: any) =>
         (g.name || '').toLowerCase().includes(query) || g.chatId === params.group
       );
-      if (!match) {
+      if (match) {
+        matchName = match.name;
+      } else if (/^-?\d+$/.test(params.group)) {
+        // Allow registering by raw numeric chat ID even if not yet discovered
+        // (Telegram bot discovers chats from incoming messages, so first registration
+        // often uses the chat ID directly before any messages are received)
+        matchName = params.group; // Use chat ID as name until discovered
+      } else {
         throw new Error(
-          `No Telegram chat matching "${params.group}". The bot discovers chats from incoming messages — send a message first, or use the numeric chat ID.`
+          `No Telegram chat matching "${params.group}". Use the numeric chat ID, or send a message in the chat first so the bot discovers it.`
         );
       }
-      matchName = match.name;
       matchChannel = 'telegram';
     } else if (params.channel === 'whatsapp') {
       const waGroups = await this.whatsapp.groups();
@@ -318,6 +324,10 @@ export default class Claw extends Photon {
         );
         if (tgMatch) {
           matchName = tgMatch.name;
+          matchChannel = 'telegram';
+        } else if (/^-?\d+$/.test(params.group)) {
+          // Numeric ID that's not in WhatsApp — assume Telegram
+          matchName = params.group;
           matchChannel = 'telegram';
         }
       }

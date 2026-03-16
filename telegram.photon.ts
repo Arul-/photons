@@ -398,10 +398,15 @@ export default class Telegram extends Photon {
 
     // Resolve group name → chatId eagerly if chats are already known
     if (filter?.group) {
-      const query = filter.group.toLowerCase();
-      const id = this._chatNameIndex.get(query)
-        || [...this._chatNameIndex.entries()].find(([name]) => name.includes(query))?.[1];
-      if (id) entry.resolvedChatId = id;
+      if (/^-?\d+$/.test(filter.group)) {
+        // Numeric chat ID — use directly, no resolution needed
+        entry.resolvedChatId = filter.group;
+      } else {
+        const query = filter.group.toLowerCase();
+        const id = this._chatNameIndex.get(query)
+          || [...this._chatNameIndex.entries()].find(([name]) => name.includes(query))?.[1];
+        if (id) entry.resolvedChatId = id;
+      }
     }
 
     // Replace existing listener with same filter to prevent stale handler accumulation
@@ -701,15 +706,20 @@ export default class Telegram extends Photon {
 
       // Group name filter (fuzzy, with lazy resolution)
       if (f.group) {
-        if (!entry.resolvedChatId) {
-          // Try to resolve now
-          const query = f.group.toLowerCase();
-          const id = this._chatNameIndex.get(query)
-            || [...this._chatNameIndex.entries()].find(([name]) => name.includes(query))?.[1];
-          if (id) entry.resolvedChatId = id;
+        // If the group filter is a numeric chat ID, match directly
+        if (/^-?\d+$/.test(f.group)) {
+          if (f.group !== chatId) continue;
+        } else {
+          if (!entry.resolvedChatId) {
+            // Try to resolve now
+            const query = f.group.toLowerCase();
+            const id = this._chatNameIndex.get(query)
+              || [...this._chatNameIndex.entries()].find(([name]) => name.includes(query))?.[1];
+            if (id) entry.resolvedChatId = id;
+          }
+          if (entry.resolvedChatId && entry.resolvedChatId !== chatId) continue;
+          if (!entry.resolvedChatId) continue; // still unresolved — skip
         }
-        if (entry.resolvedChatId && entry.resolvedChatId !== chatId) continue;
-        if (!entry.resolvedChatId) continue; // still unresolved — skip
       }
 
       // Trigger filter (substring match)
