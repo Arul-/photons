@@ -7,7 +7,6 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   downloadMediaMessage,
-  fetchLatestBaileysVersion,
   WASocket,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
@@ -210,28 +209,15 @@ export default class WhatsApp extends Photon {
   private async _doConnect(): Promise<any> {
     try {
       const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
-      const { version } = await fetchLatestBaileysVersion();
 
       this.sock = makeWASocket({
-        version,
         auth: {
           creds: state.creds,
           keys: makeCacheableSignalKeyStore(state.keys, this._logger),
         },
         printQRInTerminal: false,
-        browser: Browsers.macOS('Desktop'),
         logger: this._logger,
-        // Minimize phone-side "Syncing" notifications:
-        // - syncFullHistory: false → don't request full history from phone
-        // - markOnlineOnConnect: false → don't announce presence on connect
-        // - fireInitQueries: false → skip privacy/blocklist/props queries (reduces server traffic)
-        // - shouldSyncHistoryMessage: () => false → reject all history sync requests
-        // Note: phone still shows "syncing" on reconnect (protocol-level, unavoidable)
-        // — the only real mitigation is keeping the connection alive
-        syncFullHistory: false,
-        markOnlineOnConnect: false,
-        fireInitQueries: false,
-        shouldSyncHistoryMessage: () => false,
+        browser: Browsers.macOS('Chrome'),
       });
 
       // Wire persistent event handlers (messages, creds, reconnect)
@@ -498,7 +484,7 @@ export default class WhatsApp extends Photon {
     try {
       const fetched = await this.sock.groupFetchAllParticipating();
       for (const [jid, meta] of Object.entries(fetched)) {
-        if (meta.subject) this.knownGroups[jid] = meta.subject;
+        if (meta.subject) this._updateGroupName(jid, meta.subject);
       }
       this._rebuildGroupIndex();
     } catch (err: any) {
@@ -739,7 +725,7 @@ export default class WhatsApp extends Photon {
     if (!this.connected || !this.sock) throw new Error('Not connected');
     const jid = await this._resolveJid(params.chat);
     await this.sock.groupUpdateSubject(jid, params.name);
-    this.knownGroups[jid] = params.name;
+    this._updateGroupName(jid, params.name);
     this._rebuildGroupIndex();
   }
 
@@ -1112,6 +1098,26 @@ export default class WhatsApp extends Photon {
     }
   }
 
+  /** Update a group name, detect renames, and notify subscribers */
+  private _updateGroupName(jid: string, newName: string): void {
+    const oldName = this.knownGroups[jid];
+    if (oldName === newName) return;
+
+    this.knownGroups[jid] = newName;
+
+    if (oldName) {
+      // Name changed on a known group — notify subscribers
+      this.emit({ type: 'group:renamed', jid, oldName, newName });
+
+      // Update listener filters that referenced the old name
+      for (const entry of this._eventListeners) {
+        if (entry.filter?.group && entry.filter.group.toLowerCase() === oldName.toLowerCase()) {
+          entry.filter.group = newName;
+        }
+      }
+    }
+  }
+
   /** Resolve a human-readable chat identifier to a WhatsApp JID.
    * - Already a JID (contains '@')  → passthrough
    * - Phone number (digits/+/spaces) → NNN@s.whatsapp.net
@@ -1446,21 +1452,15 @@ export default class WhatsApp extends Photon {
   private async _reconnect(): Promise<void> {
     if (this._destroyed) return; // Old instance after hot-reload — don't reconnect
     const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
-    const { version } = await fetchLatestBaileysVersion();
 
     this.sock = makeWASocket({
-      version,
       auth: {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, this._logger),
       },
       printQRInTerminal: false,
-      browser: Browsers.macOS('Desktop'),
       logger: this._logger,
-      syncFullHistory: false,
-      markOnlineOnConnect: false,
-      fireInitQueries: false,
-      shouldSyncHistoryMessage: () => false,
+      browser: Browsers.macOS('Chrome'),
     });
 
     this._wireSocketEvents(saveCreds);
@@ -1502,7 +1502,7 @@ export default class WhatsApp extends Photon {
     try {
       const groups = await this.sock.groupFetchAllParticipating();
       for (const [jid, meta] of Object.entries(groups)) {
-        if (meta.subject) this.knownGroups[jid] = meta.subject;
+        if (meta.subject) this._updateGroupName(jid, meta.subject);
       }
       this._rebuildGroupIndex();
     } catch (err: any) {

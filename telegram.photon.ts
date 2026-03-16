@@ -719,10 +719,23 @@ export default class Telegram extends Photon {
     const chatId = String(chat.id);
     const chatName = chat.title || chat.first_name || chat.username || chatId;
 
-    // Update chat index
-    if (!this.knownChats[chatId] || this.knownChats[chatId] !== chatName) {
+    // Update chat index — detect renames
+    const previousName = this.knownChats[chatId];
+    if (previousName !== chatName) {
       this.knownChats[chatId] = chatName;
       this._rebuildChatIndex();
+
+      if (previousName) {
+        // Name changed on a known chat — notify subscribers
+        this.emit({ type: 'group:renamed', chatId, oldName: previousName, newName: chatName });
+
+        // Update listener filters that referenced the old name
+        for (const entry of this._eventListeners) {
+          if (entry.filter?.group && entry.filter.group.toLowerCase() === previousName.toLowerCase()) {
+            entry.filter.group = chatName;
+          }
+        }
+      }
     }
 
     // Build inbound message
