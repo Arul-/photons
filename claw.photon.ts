@@ -145,27 +145,32 @@ export default class Claw extends Photon {
     let waStatus = await this.whatsapp.status();
 
     if (waStatus.status !== 'connected') {
+      let skipWait = false;
       if (waStatus.status === 'disconnected') {
         yield { emit: 'status', message: 'WhatsApp disconnected — attempting to reconnect...' };
         try {
           const connectResult = await this.whatsapp.connect();
           if (connectResult.status === 'qr_pending') {
-            yield { emit: 'status', message: 'WhatsApp needs QR authentication. Run `photon whatsapp connect` to scan the QR code.' };
+            yield { emit: 'status', message: 'WhatsApp needs QR authentication. Run `photon whatsapp connect` to scan.' };
+            skipWait = true; // No point waiting — needs manual QR scan
           }
         } catch {
-          // connect() may fail transiently — fall through to polling
+          // connect() may fail — if no saved credentials, skip the wait
+          skipWait = true;
         }
       }
 
-      // Poll until connected — yield progress so the user sees what's happening
-      const maxWaitMs = 120_000;
-      const started = Date.now();
-      while (Date.now() - started < maxWaitMs) {
-        await new Promise(r => setTimeout(r, 3000));
-        waStatus = await this.whatsapp.status();
-        if (waStatus.status === 'connected') break;
-        const elapsed = Math.round((Date.now() - started) / 1000);
-        yield { emit: 'status', message: `Waiting for WhatsApp... ${elapsed}s (${waStatus.status})` };
+      // Only poll-wait if WhatsApp has credentials and might be reconnecting
+      if (!skipWait && waStatus.status !== 'connected') {
+        const maxWaitMs = 30_000; // 30s max — don't block Telegram
+        const started = Date.now();
+        while (Date.now() - started < maxWaitMs) {
+          await new Promise(r => setTimeout(r, 3000));
+          waStatus = await this.whatsapp.status();
+          if (waStatus.status === 'connected') break;
+          const elapsed = Math.round((Date.now() - started) / 1000);
+          yield { emit: 'status', message: `Waiting for WhatsApp... ${elapsed}s (${waStatus.status})` };
+        }
       }
 
       if (waStatus.status !== 'connected') {
