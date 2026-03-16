@@ -79,25 +79,29 @@ export default class Courier extends Photon {
   // ─── Public API ────────────────────────────────────────────────
 
   /**
-   * Subscribe to a channel with scheduled delivery.
-   * Messages are captured in a persistent inbox and delivered
-   * in batches at clock-aligned times.
+   * Subscribe to a channel with durable delivery.
+   * Messages are persisted to a disk-backed inbox. With a schedule,
+   * they're delivered in batches at clock-aligned times. Without a
+   * schedule, they're delivered immediately but still persisted —
+   * use drain() after restart to catch up on missed messages.
    *
    * @title Subscribe
    * @param channel Channel name {@choice telegram, whatsapp}
    * @param id Unique subscriber ID (e.g. "claw:personal-chat")
-   * @param schedule Delivery schedule {@choice @5m, @15m, @30m, @hourly, @daily} {@example "@30m"}
+   * @param schedule Delivery schedule (omit for real-time) {@choice @5m, @15m, @30m, @hourly, @daily}
    * @param group Group name or chat ID to filter
    * @param trigger Trigger substring filter
+   * @param handler Callback for message delivery (scheduled mode delivers batches, real-time delivers singles)
    */
   async subscribe(params: {
     channel: string;
     id: string;
-    schedule: string;
+    schedule?: string;
     group?: string;
     trigger?: string;
-  }): Promise<{ status: string; nextDelivery: string }> {
-    const { channel, id, schedule, group, trigger } = params;
+    handler?: (messages: InboxEntry[]) => void;
+  }): Promise<{ status: string; mode: string; nextDelivery?: string }> {
+    const { channel, id, schedule, group, trigger, handler } = params;
     const ch = this._resolveChannel(channel);
     if (!ch) throw new Error(`Unknown channel: ${channel}. Available: telegram, whatsapp`);
 
@@ -111,6 +115,7 @@ export default class Courier extends Photon {
       schedule,
       group,
       trigger,
+      handler,
       createdAt: Date.now(),
     };
 
@@ -119,14 +124,18 @@ export default class Courier extends Photon {
     // Subscribe to the underlying channel — messages go to inbox
     this._registerChannelListener(id, sub);
 
-    // Start aligned delivery schedule
-    this._startSchedule(id, sub);
+    // Start aligned delivery schedule if specified
+    if (schedule) {
+      this._startSchedule(id, sub);
+      const nextMs = _nextAlignedTime(_parseSchedule(schedule));
+      return {
+        status: 'subscribed',
+        mode: 'scheduled',
+        nextDelivery: new Date(nextMs).toISOString(),
+      };
+    }
 
-    const nextMs = _nextAlignedTime(_parseSchedule(schedule));
-    return {
-      status: 'subscribed',
-      nextDelivery: new Date(nextMs).toISOString(),
-    };
+    return { status: 'subscribed', mode: 'realtime' };
   }
 
   /**
@@ -175,27 +184,31 @@ export default class Courier extends Photon {
   async subscriptions(): Promise<Array<{
     id: string;
     channel: string;
-    schedule: string;
+    mode: string;
+    schedule?: string;
     group?: string;
     trigger?: string;
     inboxCount: number;
-    nextDelivery: string;
+    nextDelivery?: string;
   }>> {
     const result = [];
     for (const [id, sub] of this._subscriptions) {
       const cursor = this._loadCursor(id);
       const inbox = this._readInboxFrom(sub.channel, cursor);
       const filtered = this._filterForSubscriber(inbox, sub);
-      const nextMs = _nextAlignedTime(_parseSchedule(sub.schedule));
-      result.push({
+      const entry: any = {
         id,
         channel: sub.channel,
+        mode: sub.schedule ? 'scheduled' : 'realtime',
         schedule: sub.schedule,
         group: sub.group,
         trigger: sub.trigger,
         inboxCount: filtered.length,
-        nextDelivery: new Date(nextMs).toISOString(),
-      });
+      };
+      if (sub.schedule) {
+        entry.nextDelivery = new Date(_nextAlignedTime(_parseSchedule(sub.schedule))).toISOString();
+      }
+      result.push(entry);
     }
     return result;
   }
@@ -249,7 +262,15 @@ export default class Courier extends Photon {
         message: data.message,
         receivedAt: Date.now(),
       };
+
+      // Always persist to inbox (durable delivery guarantee)
       this._appendToInbox(sub.channel, entry);
+
+      // Real-time mode: deliver immediately + advance cursor
+      if (!sub.schedule && sub.handler) {
+        sub.handler([entry]);
+        this._advanceCursor(id, entry.receivedAt);
+      }
     };
 
     const filter: any = {};
@@ -342,6 +363,7 @@ export default class Courier extends Photon {
 
   /** Start clock-aligned delivery schedule for a subscriber */
   private _startSchedule(id: string, sub: Subscription): void {
+    if (!sub.schedule) return;
     const intervalMs = _parseSchedule(sub.schedule);
     const nextFire = _nextAlignedTime(intervalMs);
     const delay = nextFire - Date.now();
@@ -349,6 +371,8 @@ export default class Courier extends Photon {
     const fire = () => {
       const batch = this._deliverBatch(id, sub);
       if (batch.length > 0) {
+        // Deliver via handler if provided
+        if (sub.handler) sub.handler(batch);
         this.emit({ type: 'delivered', subscriberId: id, count: batch.length });
       }
       // Schedule next aligned tick
@@ -433,9 +457,10 @@ export default class Courier extends Photon {
 
 interface Subscription {
   channel: string;
-  schedule: string;
+  schedule?: string;
   group?: string;
   trigger?: string;
+  handler?: (messages: InboxEntry[]) => void;
   createdAt: number;
   /** Cleanup function to unsubscribe from channel */
   _channelOff?: () => void;
