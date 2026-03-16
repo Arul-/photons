@@ -54,6 +54,9 @@ export default class Telegram extends Photon {
   private _chatNameIndex: Map<string, string> = new Map(); // lowercase name → chatId
   private outgoingQueue: Array<{ chatId: string; text: string; queuedAt: number }> = [];
   private flushing = false;
+  /** Recently processed update IDs for deduplication after restart */
+  private _processedIds: Set<number> = new Set();
+  private readonly _maxProcessedIds = 500;
 
   private get authDir(): string {
     if (this._photonFilePath) return this.storage('auth');
@@ -62,6 +65,10 @@ export default class Telegram extends Photon {
 
   private get tokenPath(): string {
     return path.join(this.authDir, 'token.json');
+  }
+
+  private get offsetPath(): string {
+    return path.join(this.authDir, 'offset.json');
   }
 
   // ─── Lifecycle Hooks ──────────────────────────────────────────
@@ -83,6 +90,7 @@ export default class Telegram extends Photon {
       this._eventListeners = old._eventListeners || [];
       this.knownChats = old.knownChats || {};
       this.outgoingQueue = old.outgoingQueue || [];
+      this._processedIds = old._processedIds || new Set();
 
       this._rebuildChatIndex();
 
@@ -121,6 +129,8 @@ export default class Telegram extends Photon {
       this._pollAbort.abort();
       this._pollAbort = null;
     }
+    // Persist offset so next startup resumes from here
+    if (this._offset > 0) this._persistOffset();
   }
 
   // ─── Connection ───────────────────────────────────────────────
@@ -171,6 +181,11 @@ export default class Telegram extends Photon {
     this._connected = true;
     this._reconnectAttempts = 0;
     this._lastConnectedAt = Date.now();
+
+    // Restore persisted offset so we pick up messages from where we left off
+    if (this._offset === 0) {
+      this._offset = this._loadPersistedOffset();
+    }
 
     // Start polling
     this._polling = true;
@@ -463,6 +478,40 @@ export default class Telegram extends Photon {
     this.emit({ type: 'logged_out' });
   }
 
+  // ─── Offset Persistence ──────────────────────────────────────
+
+  /** Persist current offset to disk (atomic write) */
+  private _persistOffset(): void {
+    try {
+      const data = JSON.stringify({ offset: this._offset, botId: this._botId, updatedAt: Date.now() });
+      const tmp = this.offsetPath + '.tmp';
+      fs.writeFileSync(tmp, data);
+      fs.renameSync(tmp, this.offsetPath);
+    } catch {
+      // Non-fatal — worst case we re-process a few messages on restart
+    }
+  }
+
+  /** Load persisted offset from disk, validating bot token matches */
+  private _loadPersistedOffset(): number {
+    try {
+      if (!fs.existsSync(this.offsetPath)) return 0;
+      const data = JSON.parse(fs.readFileSync(this.offsetPath, 'utf-8'));
+      // Reject offset if bot ID changed (different bot token → different message stream)
+      if (data.botId && data.botId !== this._botId) {
+        this.emit({ type: 'offset_rejected', reason: 'bot_id_mismatch', storedBotId: data.botId, currentBotId: this._botId });
+        return 0;
+      }
+      if (typeof data.offset === 'number' && data.offset > 0) {
+        this.emit({ type: 'offset_restored', offset: data.offset });
+        return data.offset;
+      }
+    } catch {
+      // Corrupted file — start fresh
+    }
+    return 0;
+  }
+
   // ─── Internals ────────────────────────────────────────────────
 
   /** Core Telegram Bot API caller */
@@ -542,11 +591,31 @@ export default class Telegram extends Photon {
         if (this._destroyed) return;
 
         for (const update of updates) {
+          // Dedup: skip updates we already processed before a restart
+          if (this._processedIds.has(update.update_id)) continue;
+
           this._handleUpdate(update);
-          // Always advance offset past processed updates
+
+          // Track processed ID for dedup
+          this._processedIds.add(update.update_id);
+          if (this._processedIds.size > this._maxProcessedIds) {
+            // Evict oldest entries (smallest IDs)
+            const ids = [...this._processedIds].sort((a, b) => a - b);
+            for (let i = 0; i < ids.length - this._maxProcessedIds; i++) {
+              this._processedIds.delete(ids[i]);
+            }
+          }
+
+          // Advance offset past processed update
           if (update.update_id >= this._offset) {
             this._offset = update.update_id + 1;
           }
+        }
+
+        // Persist offset after processing the batch — if we crash before
+        // next persist, we'll re-fetch from this offset and dedup
+        if (updates.length > 0) {
+          this._persistOffset();
         }
 
         // Successful poll — check if connection is stable enough to reset backoff
