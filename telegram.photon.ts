@@ -593,22 +593,9 @@ export default class Telegram extends Photon {
     return data.result;
   }
 
-  /** Send text with automatic chunking for long messages */
+  /** Send text with semantic chunking for long messages */
   private async _sendText(chatId: string, html: string, replyToMessageId?: number): Promise<any> {
-    // Chunk at MAX_MESSAGE_LENGTH boundaries
-    const chunks: string[] = [];
-    let remaining = html;
-    while (remaining.length > 0) {
-      if (remaining.length <= MAX_MESSAGE_LENGTH) {
-        chunks.push(remaining);
-        break;
-      }
-      // Try to split at last newline within limit
-      let splitAt = remaining.lastIndexOf('\n', MAX_MESSAGE_LENGTH);
-      if (splitAt <= 0) splitAt = MAX_MESSAGE_LENGTH;
-      chunks.push(remaining.slice(0, splitAt));
-      remaining = remaining.slice(splitAt).replace(/^\n/, '');
-    }
+    const chunks = _smartChunk(html, MAX_MESSAGE_LENGTH);
 
     let lastResult: any;
     for (let i = 0; i < chunks.length; i++) {
@@ -624,10 +611,10 @@ export default class Telegram extends Photon {
       try {
         lastResult = await this._api('sendMessage', payload);
       } catch (err: any) {
-        // HTML parse failure — retry as plain text
+        // HTML parse failure — retry as plain text, stripping tags
         if (err.message.includes("can't parse")) {
           delete payload.parse_mode;
-          payload.text = chunks[i];
+          payload.text = chunks[i].replace(/<[^>]+>/g, '');
           lastResult = await this._api('sendMessage', payload);
         } else {
           throw err;
@@ -950,10 +937,13 @@ interface InboundMessage {
 
 /** Convert Markdown to Telegram-safe HTML */
 function _markdownToTelegramHtml(text: string): string {
-  // Preserve code blocks first
+  // Preserve code blocks first (with optional language tag)
   const codeBlocks: string[] = [];
-  let result = text.replace(/```([\s\S]*?)```/g, (_, code) => {
-    codeBlocks.push(code);
+  let result = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+    const trimmed = code.replace(/\n$/, '');
+    codeBlocks.push(lang
+      ? `<pre><code class="language-${lang}">${_escHtml(trimmed)}</code></pre>`
+      : `<pre>${_escHtml(trimmed)}</pre>`);
     return `\x00CODEBLOCK${codeBlocks.length - 1}\x00`;
   });
 
@@ -967,6 +957,17 @@ function _markdownToTelegramHtml(text: string): string {
   // Escape HTML entities in remaining text
   result = result.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+  // Blockquotes: > text (multi-line, consecutive > lines merged)
+  result = result.replace(/^(?:&gt;\s?.+\n?)+/gm, (block) => {
+    const inner = block.replace(/^&gt;\s?/gm, '').replace(/\n$/, '');
+    // Use expandable blockquote for long quotes (>3 lines)
+    const lineCount = inner.split('\n').length;
+    if (lineCount > 3) {
+      return `<blockquote expandable>${inner}</blockquote>\n`;
+    }
+    return `<blockquote>${inner}</blockquote>\n`;
+  });
+
   // Bold: **text** or __text__
   result = result.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
   result = result.replace(/__(.+?)__/g, '<b>$1</b>');
@@ -978,26 +979,142 @@ function _markdownToTelegramHtml(text: string): string {
   // Strikethrough: ~~text~~
   result = result.replace(/~~(.+?)~~/g, '<s>$1</s>');
 
+  // Underline: ==text== (custom, useful for emphasis hierarchy)
+  result = result.replace(/==(.+?)==/g, '<u>$1</u>');
+
   // Links: [text](url)
   result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
 
-  // Headers: # text → bold
-  result = result.replace(/^#{1,6}\s+(.+)$/gm, '<b>$1</b>');
+  // Headers: # text → bold (## and deeper get smaller visual treatment)
+  result = result.replace(/^#{1,2}\s+(.+)$/gm, '\n<b>$1</b>\n');
+  result = result.replace(/^#{3,6}\s+(.+)$/gm, '<b>$1</b>');
 
-  // List items: - item → bullet
+  // Numbered lists: 1. item → keep number with dot
+  result = result.replace(/^(\d+)\.\s+/gm, '$1. ');
+
+  // Unordered list items: - item → bullet
   result = result.replace(/^[-*]\s+/gm, '• ');
+
+  // Horizontal rules: --- or *** → visual separator
+  result = result.replace(/^[-*]{3,}$/gm, '───────────────');
 
   // Restore inline code
   result = result.replace(/\x00INLINE(\d+)\x00/g, (_, i) =>
     `<code>${_escHtml(inlineCodes[Number(i)])}</code>`
   );
 
-  // Restore code blocks
-  result = result.replace(/\x00CODEBLOCK(\d+)\x00/g, (_, i) =>
-    `<pre>${_escHtml(codeBlocks[Number(i)])}</pre>`
+  // Restore code blocks (already HTML-escaped inside)
+  result = result.replace(/\x00CODEBLOCK(\d+)\x00/g, (_, i) => codeBlocks[Number(i)]);
+
+  // Markdown tables → formatted monospace (Telegram has no table support)
+  // Mobile monospace wraps at ~35 chars, so use compact rendering
+  result = result.replace(
+    /(?:^[ \t]*\|.+\|[ \t]*\n)+/gm,
+    (tableBlock) => {
+      const rows = tableBlock.trim().split('\n').map(r =>
+        r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim())
+      );
+      // Skip separator rows (---|---|---)
+      const dataRows = rows.filter(r => !r.every(c => /^[-:]+$/.test(c)));
+      if (dataRows.length === 0) return tableBlock;
+
+      const colCount = Math.max(...dataRows.map(r => r.length));
+      const widths = Array.from({ length: colCount }, (_, col) =>
+        Math.max(...dataRows.map(r => (r[col] || '').length), 3)
+      );
+      const totalWidth = widths.reduce((a, b) => a + b, 0) + (colCount - 1) * 2;
+
+      // If table fits in ~35 chars, render as aligned columns
+      if (totalWidth <= 35) {
+        const lines = dataRows.map(row => {
+          const cells = Array.from({ length: colCount }, (_, col) =>
+            (row[col] || '').padEnd(widths[col])
+          );
+          return cells.join(' │ ');
+        });
+        if (lines.length > 1) {
+          const sep = widths.map(w => '─'.repeat(w)).join('─┼─');
+          lines.splice(1, 0, sep);
+        }
+        return `<pre>${lines.join('\n')}</pre>\n`;
+      }
+
+      // Wide table → vertical card layout
+      const headers = dataRows[0];
+      const bodyRows = dataRows.slice(1);
+      const cards = bodyRows.map(row =>
+        headers.map((h, i) => `<b>${h}:</b> ${row[i] || '—'}`).join('\n')
+      );
+      return cards.join('\n\n') + '\n';
+    }
   );
 
-  return result;
+  // Clean up excessive blank lines
+  result = result.replace(/\n{3,}/g, '\n\n');
+
+  return result.trim();
+}
+
+/** Split HTML into chunks that respect semantic boundaries */
+function _smartChunk(html: string, maxLen: number): string[] {
+  if (html.length <= maxLen) return [html];
+
+  const chunks: string[] = [];
+  let remaining = html;
+
+  while (remaining.length > 0) {
+    if (remaining.length <= maxLen) {
+      chunks.push(remaining);
+      break;
+    }
+
+    let splitAt = -1;
+    const searchRange = remaining.slice(0, maxLen);
+
+    // Priority 1: Split at paragraph boundary (double newline)
+    const paraBreak = searchRange.lastIndexOf('\n\n');
+    if (paraBreak > maxLen * 0.3) {
+      splitAt = paraBreak;
+    }
+
+    // Priority 2: Split at single newline (but not inside <pre> blocks)
+    if (splitAt === -1) {
+      // Check if we're inside a <pre> block
+      const lastPreOpen = searchRange.lastIndexOf('<pre');
+      const lastPreClose = searchRange.lastIndexOf('</pre>');
+      const insidePre = lastPreOpen > lastPreClose;
+
+      if (insidePre) {
+        // Try to split before the <pre> block
+        splitAt = lastPreOpen > maxLen * 0.2 ? searchRange.lastIndexOf('\n', lastPreOpen) : -1;
+        if (splitAt <= 0) {
+          // Force close the pre, split, and reopen
+          splitAt = searchRange.lastIndexOf('\n', maxLen - 10);
+          if (splitAt > 0) {
+            chunks.push(remaining.slice(0, splitAt) + '</pre>');
+            remaining = '<pre>' + remaining.slice(splitAt).replace(/^\n/, '');
+            continue;
+          }
+        }
+      } else {
+        splitAt = searchRange.lastIndexOf('\n');
+      }
+    }
+
+    // Priority 3: Split at sentence boundary
+    if (splitAt <= 0) {
+      const sentenceEnd = searchRange.search(/[.!?]\s+(?=[A-Z])[^<]*$/);
+      if (sentenceEnd > maxLen * 0.3) splitAt = sentenceEnd + 1;
+    }
+
+    // Priority 4: Hard break at max length
+    if (splitAt <= 0) splitAt = maxLen;
+
+    chunks.push(remaining.slice(0, splitAt));
+    remaining = remaining.slice(splitAt).replace(/^\n+/, '');
+  }
+
+  return chunks.filter(c => c.trim().length > 0);
 }
 
 /** Convert Telegram entities to Markdown */
