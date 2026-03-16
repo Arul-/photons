@@ -147,17 +147,24 @@ export default class Claw extends Photon {
     if (waStatus.status !== 'connected') {
       let skipWait = false;
       if (waStatus.status === 'disconnected') {
-        yield { emit: 'status', message: 'WhatsApp disconnected — attempting to reconnect...' };
+        yield { emit: 'status', message: 'WhatsApp disconnected — quick connect attempt...' };
         try {
-          const connectResult = await this.whatsapp.connect();
+          // Timeout connect() after 10s — Baileys init can be slow with no auth
+          const connectResult = await Promise.race([
+            this.whatsapp.connect(),
+            new Promise<{ status: string }>((_, reject) =>
+              setTimeout(() => reject(new Error('timeout')), 10_000)
+            ),
+          ]);
           if (connectResult.status === 'qr_pending') {
-            yield { emit: 'status', message: 'WhatsApp needs QR authentication. Run `photon whatsapp connect` to scan.' };
-            skipWait = true; // No point waiting — needs manual QR scan
+            yield { emit: 'status', message: 'WhatsApp needs QR. Run `photon whatsapp connect` to scan.' };
+            skipWait = true;
           }
         } catch {
-          // connect() may fail — if no saved credentials, skip the wait
           skipWait = true;
         }
+      } else {
+        skipWait = true; // Unknown/other state — don't wait
       }
 
       // Only poll-wait if WhatsApp has credentials and might be reconnecting
