@@ -1,316 +1,884 @@
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+
+import { Photon } from '@portel/photon-core';
+
+/** Max age for queued messages before they're dropped on flush (1 hour) */
+const MESSAGE_TTL_MS = 60 * 60 * 1000;
+
+/** Telegram Bot API max message length */
+const MAX_MESSAGE_LENGTH = 4096;
+
 /**
- * Telegram - Send messages via Telegram Bot API
- * Like n8n's Telegram node - notifications and bot automation
+ * Telegram — live Telegram bot connection via Bot API.
  *
- * Perfect for:
- * - Personal notifications
- * - Alert systems
- * - Bot automation
- * - Group notifications
+ * Manages authentication, message delivery, and chat metadata.
+ * Buffers inbound messages for polling by orchestrators (e.g. claw).
+ *
+ * @version 1.0.0
+ * @icon 🤖
+ * @tags telegram, messaging, nanoclaw
+ * @stateful
  */
-export default class Telegram {
-  private token: string;
-  private baseUrl: string;
+export default class Telegram extends Photon {
+  protected settings = {
+    /** Enable verbose debug logging */
+    debug: false,
+    /** Max reconnect attempts before giving up */
+    maxReconnectAttempts: 10,
+    /** Long-polling timeout in seconds (Telegram server holds connection this long) */
+    pollingTimeoutSeconds: 30,
+  };
 
-  constructor(botToken: string) {
-    this.token = botToken;
-    this.baseUrl = `https://api.telegram.org/bot${botToken}`;
+  private _token = '';
+  private _botId = 0;
+  private _botUsername = '';
+  private _polling = false;
+  private _offset = 0;
+  private _connected = false;
+  private _reconnectAttempts = 0;
+  private _lastConnectedAt = 0;
+  private readonly _stableConnectionMs = 5 * 60 * 1000;
+  private _destroyed = false;
+  private _connectPromise: Promise<any> | null = null;
+  private _pollAbort: AbortController | null = null;
+  private _pendingMessages: Array<{ chatId: string; message: InboundMessage }> = [];
+  private _eventListeners: Array<{
+    event: string;
+    fn: (data: any) => void;
+    filter?: { group?: string; chatId?: string; trigger?: string; fromMe?: boolean };
+    resolvedChatId?: string;
+  }> = [];
+  private knownChats: Record<string, string> = {}; // chatId → name
+  private _chatNameIndex: Map<string, string> = new Map(); // lowercase name → chatId
+  private outgoingQueue: Array<{ chatId: string; text: string; queuedAt: number }> = [];
+  private flushing = false;
+
+  private get authDir(): string {
+    if (this._photonFilePath) return this.storage('auth');
+    return path.join(os.homedir(), '.photon', 'data', 'telegram', 'auth');
   }
 
-  /**
-   * Send a text message
-   * @param chatId Chat ID or @username
-   * @param text Message text (supports Markdown or HTML)
-   * @param parseMode Parse mode: Markdown, MarkdownV2, or HTML
-   * @param disableNotification Send silently
-   * @param replyToMessageId Message ID to reply to
-   * @timeout 10s
-   * @retryable 2 2s
-   * @throttled 25/min
-   */
-  async send(params: {
-    chatId: string | number;
-    text: string;
-    parseMode?: 'Markdown' | 'MarkdownV2' | 'HTML';
-    disableNotification?: boolean;
-    replyToMessageId?: number;
-  }) {
-    const payload: any = {
-      chat_id: params.chatId,
-      text: params.text,
-    };
-
-    if (params.parseMode) payload.parse_mode = params.parseMode;
-    if (params.disableNotification) payload.disable_notification = true;
-    if (params.replyToMessageId) payload.reply_to_message_id = params.replyToMessageId;
-
-    return this._request('sendMessage', payload);
+  private get tokenPath(): string {
+    return path.join(this.authDir, 'token.json');
   }
 
-  /**
-   * Send a photo
-   * @param chatId Chat ID or @username
-   * @param photo Photo URL or file_id
-   * @param caption Photo caption
-   * @param parseMode Parse mode for caption
-   * @timeout 15s
-   * @retryable 2 2s
-   * @throttled 25/min
-   */
-  async sendPhoto(params: {
-    chatId: string | number;
-    photo: string;
-    caption?: string;
-    parseMode?: 'Markdown' | 'MarkdownV2' | 'HTML';
-  }) {
-    const payload: any = {
-      chat_id: params.chatId,
-      photo: params.photo,
-    };
+  // ─── Lifecycle Hooks ──────────────────────────────────────────
 
-    if (params.caption) payload.caption = params.caption;
-    if (params.parseMode) payload.parse_mode = params.parseMode;
+  async onInitialize(ctx?: any): Promise<void> {
+    if (ctx?.reason === 'hot-reload' && ctx.oldInstance) {
+      const old = ctx.oldInstance as any;
+      old._destroyed = true;
 
-    return this._request('sendPhoto', payload);
-  }
+      // Transfer state
+      this._token = old._token;
+      this._botId = old._botId;
+      this._botUsername = old._botUsername;
+      this._offset = old._offset;
+      this._connected = old._connected;
+      this._reconnectAttempts = old._reconnectAttempts;
+      this._lastConnectedAt = old._lastConnectedAt;
+      this._pendingMessages = old._pendingMessages || [];
+      this._eventListeners = old._eventListeners || [];
+      this.knownChats = old.knownChats || {};
+      this.outgoingQueue = old.outgoingQueue || [];
 
-  /**
-   * Send a document/file
-   * @param chatId Chat ID or @username
-   * @param document Document URL or file_id
-   * @param caption Document caption
-   * @timeout 30s
-   * @retryable 2 3s
-   * @throttled 25/min
-   */
-  async sendDocument(params: {
-    chatId: string | number;
-    document: string;
-    caption?: string;
-  }) {
-    const payload: any = {
-      chat_id: params.chatId,
-      document: params.document,
-    };
+      this._rebuildChatIndex();
 
-    if (params.caption) payload.caption = params.caption;
+      // Restart polling on the new instance
+      if (old._polling) {
+        old._polling = false;
+        if (old._pollAbort) old._pollAbort.abort();
+        this._polling = true;
+        this._pollLoop();
+      }
 
-    return this._request('sendDocument', payload);
-  }
-
-  /**
-   * Send a location
-   * @param chatId Chat ID or @username
-   * @param latitude Latitude
-   * @param longitude Longitude
-   * @timeout 10s
-   * @retryable 2 2s
-   */
-  async sendLocation(params: {
-    chatId: string | number;
-    latitude: number;
-    longitude: number;
-  }) {
-    return this._request('sendLocation', {
-      chat_id: params.chatId,
-      latitude: params.latitude,
-      longitude: params.longitude,
-    });
-  }
-
-  /**
-   * Send a poll
-   * @param chatId Chat ID or @username
-   * @param question Poll question
-   * @param options Poll options (2-10 options)
-   * @param isAnonymous Is the poll anonymous
-   * @param type Poll type: regular or quiz
-   * @timeout 10s
-   * @retryable 2 2s
-   */
-  async sendPoll(params: {
-    chatId: string | number;
-    question: string;
-    options: string[];
-    isAnonymous?: boolean;
-    type?: 'regular' | 'quiz';
-    correctOptionId?: number;
-  }) {
-    const payload: any = {
-      chat_id: params.chatId,
-      question: params.question,
-      options: JSON.stringify(params.options),
-    };
-
-    if (params.isAnonymous !== undefined) payload.is_anonymous = params.isAnonymous;
-    if (params.type) payload.type = params.type;
-    if (params.correctOptionId !== undefined) payload.correct_option_id = params.correctOptionId;
-
-    return this._request('sendPoll', payload);
-  }
-
-  /**
-   * Send a formatted alert message
-   * @param chatId Chat ID
-   * @param level Alert level
-   * @param title Alert title
-   * @param message Alert message
-   * @param details Additional details
-   */
-  async alert(params: {
-    chatId: string | number;
-    level: 'info' | 'success' | 'warning' | 'error';
-    title: string;
-    message: string;
-    details?: string;
-  }) {
-    const emojis = {
-      info: 'ℹ️',
-      success: '✅',
-      warning: '⚠️',
-      error: '🚨',
-    };
-
-    let text = `${emojis[params.level]} *${params.title}*\n\n${params.message}`;
-    if (params.details) {
-      text += `\n\n\`\`\`\n${params.details}\n\`\`\``;
+      this.emit({ type: 'hot_reload_transferred' });
+      return;
     }
 
-    return this.send({
-      chatId: params.chatId,
-      text,
-      parseMode: 'Markdown',
-    });
+    // Normal startup — auto-connect if token saved
+    try {
+      if (fs.existsSync(this.tokenPath)) {
+        const data = JSON.parse(fs.readFileSync(this.tokenPath, 'utf-8'));
+        if (data.token) {
+          this.connect({ token: data.token }).catch((err) => {
+            this.emit({ type: 'auto_connect_failed', error: err.message });
+          });
+        }
+      }
+    } catch {
+      // No saved token — user needs to call connect()
+    }
   }
 
+  async onShutdown(ctx?: any): Promise<void> {
+    if (ctx?.reason === 'hot-reload') return; // preserve state for new instance
+    this._polling = false;
+    this._connected = false;
+    if (this._pollAbort) {
+      this._pollAbort.abort();
+      this._pollAbort = null;
+    }
+  }
+
+  // ─── Connection ───────────────────────────────────────────────
+
   /**
-   * Send a deployment notification
-   * @param chatId Chat ID
-   * @param app Application name
-   * @param version Version
-   * @param environment Environment
-   * @param status Deployment status
-   * @param url Deployment URL
+   * Connect to Telegram with a bot token from BotFather.
+   * Saves the token for automatic reconnection on restart.
+   *
+   * @title Connect
+   * @openWorld
+   * @param token Bot token from @BotFather {@example "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"}
    */
-  async deployment(params: {
-    chatId: string | number;
-    app: string;
-    version: string;
-    environment: string;
-    status: 'started' | 'success' | 'failed';
-    url?: string;
-  }) {
-    const emojis = {
-      started: '🚀',
-      success: '✅',
-      failed: '❌',
-    };
-
-    let text = `${emojis[params.status]} *Deployment ${params.status}*\n\n`;
-    text += `📦 *App:* ${params.app}\n`;
-    text += `🏷️ *Version:* ${params.version}\n`;
-    text += `🌍 *Environment:* ${params.environment}`;
-
-    if (params.url) {
-      text += `\n\n[View Deployment](${params.url})`;
+  async connect(params: { token: string }): Promise<{ status: string; username?: string; message?: string }> {
+    if (this._connected) {
+      return { status: 'already_connected', username: this._botUsername, message: `Already connected as @${this._botUsername}` };
     }
 
-    return this.send({
-      chatId: params.chatId,
-      text,
-      parseMode: 'Markdown',
-    });
+    // Deduplicate concurrent connect() calls
+    if (this._connectPromise) return this._connectPromise;
+
+    this._connectPromise = this._doConnect(params.token);
+    try {
+      return await this._connectPromise;
+    } finally {
+      this._connectPromise = null;
+    }
+  }
+
+  private async _doConnect(token: string): Promise<{ status: string; username?: string; message?: string }> {
+    this._token = token;
+
+    // Verify token via getMe
+    let me: any;
+    try {
+      me = await this._api('getMe');
+    } catch (err: any) {
+      this._token = '';
+      throw new Error(`Invalid bot token: ${err.message}`);
+    }
+
+    this._botId = me.id;
+    this._botUsername = me.username || '';
+
+    // Save token
+    fs.mkdirSync(this.authDir, { recursive: true });
+    fs.writeFileSync(this.tokenPath, JSON.stringify({ token, botId: me.id, username: me.username }));
+
+    this._connected = true;
+    this._reconnectAttempts = 0;
+    this._lastConnectedAt = Date.now();
+
+    // Start polling
+    this._polling = true;
+    this._pollLoop();
+
+    // Flush any queued messages
+    this._flushQueue();
+
+    this.emit({ type: 'connected', username: this._botUsername });
+    return { status: 'connected', username: this._botUsername, message: `Connected as @${this._botUsername}` };
   }
 
   /**
-   * Get bot information
-   * @timeout 10s
-   * @cached 5m
+   * Disconnect from Telegram. Stops receiving messages.
+   *
+   * @title Disconnect
+   * @destructive
    */
-  async getMe() {
-    return this._request('getMe', {});
+  async disconnect(): Promise<void> {
+    this._polling = false;
+    this._connected = false;
+    if (this._pollAbort) {
+      this._pollAbort.abort();
+      this._pollAbort = null;
+    }
+    this.emit({ type: 'disconnected' });
   }
 
   /**
-   * Get chat information
-   * @param chatId Chat ID or @username
-   * @timeout 10s
-   * @cached 5m
+   * Connection and bot status.
+   *
+   * @title Status
+   * @readOnly
+   * @closedWorld
    */
-  async getChat(params: { chatId: string | number }) {
-    return this._request('getChat', { chat_id: params.chatId });
+  async status(): Promise<{
+    status: string;
+    username: string;
+    queuedMessages: number;
+    reconnectAttempts: number;
+  }> {
+    return {
+      status: this._connected ? 'connected' : 'disconnected',
+      username: this._botUsername,
+      queuedMessages: this.outgoingQueue.length,
+      reconnectAttempts: this._reconnectAttempts,
+    };
+  }
+
+  // ─── Messaging ────────────────────────────────────────────────
+
+  /**
+   * Send a text message to a chat.
+   * Supports markdown formatting — converted to Telegram HTML automatically.
+   *
+   * @title Send Message
+   * @openWorld
+   * @param chat Chat name or ID {@choice-from groups.name}
+   * @param text Message text (supports Markdown)
+   */
+  async send(params: { chat: string; text: string }): Promise<{ queued: boolean; messageId?: number }> {
+    const chatId = this._resolveChat(params.chat);
+    const html = _markdownToTelegramHtml(params.text);
+
+    if (!this._connected) {
+      this.outgoingQueue.push({ chatId, text: params.text, queuedAt: Date.now() });
+      return { queued: true };
+    }
+
+    try {
+      const result = await this._sendText(chatId, html);
+      return { queued: false, messageId: result.message_id };
+    } catch (err: any) {
+      this.outgoingQueue.push({ chatId, text: params.text, queuedAt: Date.now() });
+      this.emit({ type: 'error', source: 'send', error: err.message });
+      return { queued: true };
+    }
   }
 
   /**
-   * Get recent updates (incoming messages)
-   * @param offset Update offset
-   * @param limit Maximum updates to return
-   * @param timeout Long polling timeout in seconds
-   * @timeout 30s
+   * Edit a previously sent message.
+   *
+   * @title Edit Message
+   * @openWorld
+   * @param chat Chat name or ID {@choice-from groups.name}
+   * @param messageId Message ID to edit
+   * @param text New text (supports Markdown)
    */
-  async getUpdates(params?: {
-    offset?: number;
-    limit?: number;
-    timeout?: number;
-  }) {
-    const payload: any = {};
-    if (params?.offset) payload.offset = params.offset;
-    if (params?.limit) payload.limit = params.limit;
-    if (params?.timeout) payload.timeout = params.timeout;
-
-    return this._request('getUpdates', payload);
-  }
-
-  /**
-   * Delete a message
-   * @param chatId Chat ID
-   * @param messageId Message ID to delete
-   * @timeout 10s
-   * @retryable 2 2s
-   */
-  async deleteMessage(params: {
-    chatId: string | number;
-    messageId: number;
-  }) {
-    return this._request('deleteMessage', {
-      chat_id: params.chatId,
+  async edit(params: { chat: string; messageId: number; text: string }): Promise<void> {
+    if (!this._connected) throw new Error('Not connected. Call connect() first.');
+    const chatId = this._resolveChat(params.chat);
+    const html = _markdownToTelegramHtml(params.text);
+    await this._api('editMessageText', {
+      chat_id: chatId,
       message_id: params.messageId,
+      text: html,
+      parse_mode: 'HTML',
     });
   }
 
   /**
-   * Pin a message
-   * @param chatId Chat ID
-   * @param messageId Message ID to pin
-   * @param disableNotification Don't notify members
-   * @timeout 10s
-   * @retryable 2 2s
+   * Reply to a specific message (quoted reply).
+   *
+   * @title Reply
+   * @openWorld
+   * @param chat Chat name or ID {@choice-from groups.name}
+   * @param text Reply text (supports Markdown)
+   * @param messageId Message ID to reply to
    */
-  async pinMessage(params: {
-    chatId: string | number;
-    messageId: number;
-    disableNotification?: boolean;
-  }) {
-    return this._request('pinChatMessage', {
-      chat_id: params.chatId,
+  async reply(params: { chat: string; text: string; messageId: number }): Promise<{ messageId: number }> {
+    if (!this._connected) throw new Error('Not connected. Call connect() first.');
+    const chatId = this._resolveChat(params.chat);
+    const html = _markdownToTelegramHtml(params.text);
+    const result = await this._sendText(chatId, html, params.messageId);
+    return { messageId: result.message_id };
+  }
+
+  /**
+   * React to a message with an emoji.
+   *
+   * @title React
+   * @openWorld
+   * @param chat Chat name or ID {@choice-from groups.name}
+   * @param messageId Message ID to react to
+   * @param emoji Emoji to react with (empty string to remove) {@example "👍"}
+   */
+  async react(params: { chat: string; messageId: number; emoji: string }): Promise<void> {
+    if (!this._connected) throw new Error('Not connected. Call connect() first.');
+    const chatId = this._resolveChat(params.chat);
+    const reaction = params.emoji
+      ? [{ type: 'emoji', emoji: params.emoji }]
+      : [];
+    await this._api('setMessageReaction', {
+      chat_id: chatId,
       message_id: params.messageId,
-      disable_notification: params.disableNotification || false,
+      reaction,
     });
   }
 
-  private async _request(method: string, payload: any) {
-    const response = await fetch(`${this.baseUrl}/${method}`, {
+  /**
+   * Send media (photo, video, audio, or document).
+   *
+   * @title Send Media
+   * @openWorld
+   * @param chat Chat name or ID {@choice-from groups.name}
+   * @param url File URL or Telegram file_id
+   * @param type Media type {@choice photo, video, audio, document}
+   * @param caption Optional caption
+   */
+  async media(params: {
+    chat: string;
+    url: string;
+    type: 'photo' | 'video' | 'audio' | 'document';
+    caption?: string;
+  }): Promise<{ messageId: number }> {
+    if (!this._connected) throw new Error('Not connected. Call connect() first.');
+    const chatId = this._resolveChat(params.chat);
+
+    const methodMap: Record<string, { method: string; field: string }> = {
+      photo: { method: 'sendPhoto', field: 'photo' },
+      video: { method: 'sendVideo', field: 'video' },
+      audio: { method: 'sendAudio', field: 'audio' },
+      document: { method: 'sendDocument', field: 'document' },
+    };
+
+    const { method, field } = methodMap[params.type];
+    const payload: any = { chat_id: chatId, [field]: params.url };
+    if (params.caption) {
+      payload.caption = _markdownToTelegramHtml(params.caption);
+      payload.parse_mode = 'HTML';
+    }
+
+    const result = await this._api(method, payload);
+    return { messageId: result.message_id };
+  }
+
+  /**
+   * Set typing indicator for a chat.
+   * Telegram typing indicators auto-expire after ~5 seconds.
+   *
+   * @title Set Typing
+   * @openWorld
+   * @param chat Chat name or ID {@choice-from groups.name}
+   * @param typing True to show typing (false is a no-op — Telegram auto-expires)
+   */
+  async typing(params: { chat: string; typing: boolean }): Promise<void> {
+    if (!this._connected || !params.typing) return;
+    const chatId = this._resolveChat(params.chat);
+    await this._api('sendChatAction', { chat_id: chatId, action: 'typing' }).catch((err: any) => {
+      this.emit({ type: 'error', source: 'typing', error: err.message });
+    });
+  }
+
+  // ─── Polling / Events ─────────────────────────────────────────
+
+  /**
+   * Return and clear buffered inbound messages.
+   * Used by orchestrators (e.g. claw) to poll for new messages.
+   *
+   * @title Pending Messages
+   * @closedWorld
+   * @format json
+   */
+  async pending(): Promise<Array<{ chatId: string; message: InboundMessage }>> {
+    const msgs = this._pendingMessages.splice(0);
+    return msgs;
+  }
+
+  /**
+   * Subscribe to events with optional filtering.
+   * @internal
+   *
+   * @example
+   * // All messages
+   * telegram.on('message', handler)
+   *
+   * // Specific group by name (fuzzy match) with trigger
+   * telegram.on('message', handler, { group: 'My Group', trigger: '@' })
+   *
+   * // By chat ID directly
+   * telegram.on('message', handler, { chatId: '-1001234567890' })
+   */
+  on(event: string, fn: (data: any) => void, filter?: { group?: string; chatId?: string; trigger?: string; fromMe?: boolean }): void {
+    const entry: typeof this._eventListeners[0] = { event, fn, filter };
+
+    // Resolve group name → chatId eagerly if chats are already known
+    if (filter?.group) {
+      const query = filter.group.toLowerCase();
+      const id = this._chatNameIndex.get(query)
+        || [...this._chatNameIndex.entries()].find(([name]) => name.includes(query))?.[1];
+      if (id) entry.resolvedChatId = id;
+    }
+
+    // Replace existing listener with same filter to prevent stale handler accumulation
+    if (filter?.chatId || filter?.group) {
+      const idx = this._eventListeners.findIndex(e =>
+        e.event === event &&
+        ((filter.chatId && e.filter?.chatId === filter.chatId) ||
+         (filter.group && e.filter?.group === filter.group))
+      );
+      if (idx !== -1) this._eventListeners.splice(idx, 1);
+    }
+
+    this._eventListeners.push(entry);
+  }
+
+  /**
+   * Unsubscribe from events.
+   * @internal
+   */
+  off(event: string, fn: (data: any) => void): void {
+    const idx = this._eventListeners.findIndex(e => e.event === event && e.fn === fn);
+    if (idx !== -1) this._eventListeners.splice(idx, 1);
+  }
+
+  // ─── Chat Management ──────────────────────────────────────────
+
+  /**
+   * List known chats (groups and DMs discovered from incoming messages).
+   * Note: Telegram Bot API has no "list all chats" endpoint —
+   * this index builds incrementally from received messages.
+   *
+   * @title List Chats
+   * @readOnly
+   * @openWorld
+   * @format table
+   */
+  async groups(): Promise<Array<{ chatId: string; name: string }>> {
+    return Object.entries(this.knownChats).map(([chatId, name]) => ({ chatId, name }));
+  }
+
+  /**
+   * Remove saved bot token and disconnect.
+   * You'll need to call connect() again with a new token.
+   *
+   * @title Logout
+   * @destructive
+   */
+  async logout(): Promise<void> {
+    await this.disconnect();
+    try { fs.unlinkSync(this.tokenPath); } catch { /* already gone */ }
+    this._token = '';
+    this._botId = 0;
+    this._botUsername = '';
+    this.emit({ type: 'logged_out' });
+  }
+
+  // ─── Internals ────────────────────────────────────────────────
+
+  /** Core Telegram Bot API caller */
+  private async _api(method: string, body?: any, signal?: AbortSignal): Promise<any> {
+    const url = `https://api.telegram.org/bot${this._token}/${method}`;
+    const opts: RequestInit = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+    };
+    if (body) opts.body = JSON.stringify(body);
+    if (signal) opts.signal = signal;
 
-    const data = await response.json();
+    const response = await fetch(url, opts);
+    const data = await response.json() as any;
 
     if (!data.ok) {
-      throw new Error(`Telegram API error: ${data.description}`);
+      throw new Error(`${method}: ${data.description || 'Unknown error'} (${data.error_code})`);
     }
-
     return data.result;
   }
+
+  /** Send text with automatic chunking for long messages */
+  private async _sendText(chatId: string, html: string, replyToMessageId?: number): Promise<any> {
+    // Chunk at MAX_MESSAGE_LENGTH boundaries
+    const chunks: string[] = [];
+    let remaining = html;
+    while (remaining.length > 0) {
+      if (remaining.length <= MAX_MESSAGE_LENGTH) {
+        chunks.push(remaining);
+        break;
+      }
+      // Try to split at last newline within limit
+      let splitAt = remaining.lastIndexOf('\n', MAX_MESSAGE_LENGTH);
+      if (splitAt <= 0) splitAt = MAX_MESSAGE_LENGTH;
+      chunks.push(remaining.slice(0, splitAt));
+      remaining = remaining.slice(splitAt).replace(/^\n/, '');
+    }
+
+    let lastResult: any;
+    for (let i = 0; i < chunks.length; i++) {
+      const payload: any = {
+        chat_id: chatId,
+        text: chunks[i],
+        parse_mode: 'HTML',
+      };
+      // Only quote the original on the first chunk
+      if (i === 0 && replyToMessageId) {
+        payload.reply_parameters = { message_id: replyToMessageId };
+      }
+      try {
+        lastResult = await this._api('sendMessage', payload);
+      } catch (err: any) {
+        // HTML parse failure — retry as plain text
+        if (err.message.includes("can't parse")) {
+          delete payload.parse_mode;
+          payload.text = chunks[i];
+          lastResult = await this._api('sendMessage', payload);
+        } else {
+          throw err;
+        }
+      }
+    }
+    return lastResult;
+  }
+
+  /** Long-polling loop */
+  private async _pollLoop(): Promise<void> {
+    while (this._polling && !this._destroyed) {
+      try {
+        this._pollAbort = new AbortController();
+        const updates = await this._api('getUpdates', {
+          offset: this._offset,
+          timeout: this.settings.pollingTimeoutSeconds,
+          allowed_updates: ['message', 'edited_message', 'channel_post'],
+        }, this._pollAbort.signal);
+
+        if (this._destroyed) return;
+
+        for (const update of updates) {
+          this._handleUpdate(update);
+          // Always advance offset past processed updates
+          if (update.update_id >= this._offset) {
+            this._offset = update.update_id + 1;
+          }
+        }
+
+        // Successful poll — check if connection is stable enough to reset backoff
+        if (Date.now() - this._lastConnectedAt >= this._stableConnectionMs) {
+          this._reconnectAttempts = 0;
+        }
+        this._lastConnectedAt = Date.now();
+
+      } catch (err: any) {
+        if (this._destroyed || !this._polling) return;
+
+        // Abort errors are expected during disconnect
+        if (err.name === 'AbortError') return;
+
+        this._reconnectAttempts++;
+        this.emit({ type: 'error', source: 'polling', error: err.message, attempt: this._reconnectAttempts });
+
+        if (this._reconnectAttempts >= this.settings.maxReconnectAttempts) {
+          this._connected = false;
+          this._polling = false;
+          this.emit({ type: 'reconnect_exhausted', attempts: this._reconnectAttempts });
+          return;
+        }
+
+        // Exponential backoff: min(5s * 2^attempt, 120s)
+        const delay = Math.min(5000 * Math.pow(2, this._reconnectAttempts - 1), 120_000);
+        if (this.settings.debug) {
+          this.emit({ type: 'reconnect_backoff', delay, attempt: this._reconnectAttempts });
+        }
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+  }
+
+  /** Process a single Telegram update */
+  private _handleUpdate(update: any): void {
+    const raw = update.message || update.channel_post || update.edited_message;
+    if (!raw) return;
+
+    const chat = raw.chat;
+    const chatId = String(chat.id);
+    const chatName = chat.title || chat.first_name || chat.username || chatId;
+
+    // Update chat index
+    if (!this.knownChats[chatId] || this.knownChats[chatId] !== chatName) {
+      this.knownChats[chatId] = chatName;
+      this._rebuildChatIndex();
+    }
+
+    // Build inbound message
+    const from = raw.from || {};
+    const fromMe = from.id === this._botId;
+    const message = this._extractMessage(raw, chatId, fromMe);
+
+    // Buffer for pending()
+    if (this._pendingMessages.length < 1000) {
+      this._pendingMessages.push({ chatId, message });
+    }
+
+    // Dispatch to registered listeners
+    this._dispatchToListeners(chatId, message);
+
+    // Emit on the messages channel
+    this.emit({ channel: 'messages', type: 'message', chatId, message });
+  }
+
+  /** Extract structured message from Telegram update */
+  private _extractMessage(raw: any, chatId: string, fromMe: boolean): InboundMessage {
+    const from = raw.from || {};
+    const senderName = [from.first_name, from.last_name].filter(Boolean).join(' ') || from.username || 'Unknown';
+
+    let content = '';
+    let type: InboundMessage['type'] = 'text';
+    let media: InboundMessage['media'] | undefined;
+    let location: InboundMessage['location'] | undefined;
+
+    if (raw.text) {
+      content = _telegramEntitiesToMarkdown(raw.text, raw.entities || []);
+      type = 'text';
+    } else if (raw.photo) {
+      type = 'photo';
+      content = raw.caption ? _telegramEntitiesToMarkdown(raw.caption, raw.caption_entities || []) : '[Photo]';
+      media = { mimetype: 'image/jpeg', caption: raw.caption };
+    } else if (raw.video) {
+      type = 'video';
+      content = raw.caption ? _telegramEntitiesToMarkdown(raw.caption, raw.caption_entities || []) : '[Video]';
+      media = { mimetype: raw.video.mime_type, caption: raw.caption, seconds: raw.video.duration };
+    } else if (raw.audio) {
+      type = 'audio';
+      content = raw.caption ? _telegramEntitiesToMarkdown(raw.caption, raw.caption_entities || []) : `[Audio: ${raw.audio.title || 'untitled'}]`;
+      media = { mimetype: raw.audio.mime_type, caption: raw.caption, seconds: raw.audio.duration };
+    } else if (raw.voice) {
+      type = 'audio';
+      content = '[Voice message]';
+      media = { mimetype: raw.voice.mime_type, seconds: raw.voice.duration };
+    } else if (raw.document) {
+      type = 'document';
+      content = raw.caption ? _telegramEntitiesToMarkdown(raw.caption, raw.caption_entities || []) : `[Document: ${raw.document.file_name || 'file'}]`;
+      media = { mimetype: raw.document.mime_type, caption: raw.caption, filename: raw.document.file_name };
+    } else if (raw.sticker) {
+      type = 'sticker';
+      content = raw.sticker.emoji || '[Sticker]';
+    } else if (raw.location) {
+      type = 'location';
+      location = { lat: raw.location.latitude, lng: raw.location.longitude };
+      content = `[Location: ${raw.location.latitude}, ${raw.location.longitude}]`;
+    } else if (raw.contact) {
+      type = 'contact';
+      content = `[Contact: ${raw.contact.first_name} ${raw.contact.phone_number || ''}]`;
+    } else if (raw.poll) {
+      type = 'poll';
+      content = `[Poll: ${raw.poll.question}]`;
+    } else {
+      type = 'unknown';
+      content = '[Unsupported message type]';
+    }
+
+    // Build quoted message context
+    let quotedMessage: InboundMessage['quotedMessage'] | undefined;
+    if (raw.reply_to_message) {
+      const q = raw.reply_to_message;
+      quotedMessage = {
+        id: String(q.message_id),
+        content: q.text || q.caption || '',
+        sender: q.from ? ([q.from.first_name, q.from.last_name].filter(Boolean).join(' ') || q.from.username || 'Unknown') : 'Unknown',
+      };
+    }
+
+    return {
+      messageId: String(raw.message_id),
+      chatId,
+      sender: String(from.id || ''),
+      senderName,
+      content,
+      timestamp: new Date((raw.date || 0) * 1000).toISOString(),
+      fromMe,
+      type,
+      ...(media ? { media } : {}),
+      ...(location ? { location } : {}),
+      ...(quotedMessage ? { quotedMessage } : {}),
+    };
+  }
+
+  /** Dispatch message to registered .on() listeners with filter matching */
+  private _dispatchToListeners(chatId: string, message: InboundMessage): void {
+    for (const entry of this._eventListeners) {
+      if (entry.event !== 'message') continue;
+
+      const f = entry.filter;
+      if (!f) {
+        entry.fn({ chatId, message });
+        continue;
+      }
+
+      // chatId filter (exact)
+      if (f.chatId && f.chatId !== chatId) continue;
+
+      // Group name filter (fuzzy, with lazy resolution)
+      if (f.group) {
+        if (!entry.resolvedChatId) {
+          // Try to resolve now
+          const query = f.group.toLowerCase();
+          const id = this._chatNameIndex.get(query)
+            || [...this._chatNameIndex.entries()].find(([name]) => name.includes(query))?.[1];
+          if (id) entry.resolvedChatId = id;
+        }
+        if (entry.resolvedChatId && entry.resolvedChatId !== chatId) continue;
+        if (!entry.resolvedChatId) continue; // still unresolved — skip
+      }
+
+      // Trigger filter (substring match)
+      if (f.trigger && !message.content.includes(f.trigger)) continue;
+
+      // fromMe filter
+      if (f.fromMe !== undefined && f.fromMe !== message.fromMe) continue;
+
+      entry.fn({ chatId, message });
+    }
+  }
+
+  /** Resolve chat name or ID to a chatId string */
+  private _resolveChat(chat: string): string {
+    // Already a numeric ID (positive for users, negative for groups/channels)
+    if (/^-?\d+$/.test(chat)) return chat;
+
+    // Fuzzy match against chat name index
+    const query = chat.toLowerCase();
+    const exact = this._chatNameIndex.get(query);
+    if (exact) return exact;
+
+    // Substring match
+    for (const [name, id] of this._chatNameIndex) {
+      if (name.includes(query)) return id;
+    }
+
+    throw new Error(
+      `No chat matching "${chat}". The bot discovers chats from incoming messages — send a message in the target chat first, or use the numeric chat ID.`
+    );
+  }
+
+  /** Rebuild the lowercase-name → chatId reverse index */
+  private _rebuildChatIndex(): void {
+    this._chatNameIndex.clear();
+    for (const [id, name] of Object.entries(this.knownChats)) {
+      this._chatNameIndex.set(name.toLowerCase(), id);
+    }
+  }
+
+  /** Flush queued outgoing messages after reconnection */
+  private async _flushQueue(): Promise<void> {
+    if (this.flushing || !this._connected || this.outgoingQueue.length === 0) return;
+    this.flushing = true;
+
+    try {
+      while (this.outgoingQueue.length > 0) {
+        const item = this.outgoingQueue[0];
+
+        // Drop expired messages
+        if (Date.now() - item.queuedAt > MESSAGE_TTL_MS) {
+          this.outgoingQueue.shift();
+          this.emit({ type: 'message_expired', chatId: item.chatId });
+          continue;
+        }
+
+        const html = _markdownToTelegramHtml(item.text);
+        await this._sendText(item.chatId, html);
+        this.outgoingQueue.shift();
+      }
+    } catch (err: any) {
+      this.emit({ type: 'error', source: 'flush', error: err.message });
+    } finally {
+      this.flushing = false;
+    }
+  }
+}
+
+// ─── Types ──────────────────────────────────────────────────────────
+
+interface InboundMessage {
+  messageId: string;
+  chatId: string;
+  sender: string;
+  senderName: string;
+  content: string;
+  timestamp: string;
+  fromMe: boolean;
+  type: 'text' | 'photo' | 'video' | 'audio' | 'document' | 'sticker' | 'location' | 'contact' | 'poll' | 'unknown';
+  media?: { mimetype?: string; caption?: string; filename?: string; seconds?: number };
+  location?: { lat: number; lng: number; name?: string };
+  quotedMessage?: { id: string; content: string; sender: string };
+}
+
+// ─── Formatting ─────────────────────────────────────────────────────
+
+/** Convert Markdown to Telegram-safe HTML */
+function _markdownToTelegramHtml(text: string): string {
+  // Preserve code blocks first
+  const codeBlocks: string[] = [];
+  let result = text.replace(/```([\s\S]*?)```/g, (_, code) => {
+    codeBlocks.push(code);
+    return `\x00CODEBLOCK${codeBlocks.length - 1}\x00`;
+  });
+
+  // Preserve inline code
+  const inlineCodes: string[] = [];
+  result = result.replace(/`([^`]+)`/g, (_, code) => {
+    inlineCodes.push(code);
+    return `\x00INLINE${inlineCodes.length - 1}\x00`;
+  });
+
+  // Escape HTML entities in remaining text
+  result = result.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  // Bold: **text** or __text__
+  result = result.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+  result = result.replace(/__(.+?)__/g, '<b>$1</b>');
+
+  // Italic: *text* or _text_ (single)
+  result = result.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<i>$1</i>');
+  result = result.replace(/(?<!_)_(?!_)(.+?)(?<!_)_(?!_)/g, '<i>$1</i>');
+
+  // Strikethrough: ~~text~~
+  result = result.replace(/~~(.+?)~~/g, '<s>$1</s>');
+
+  // Links: [text](url)
+  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+
+  // Headers: # text → bold
+  result = result.replace(/^#{1,6}\s+(.+)$/gm, '<b>$1</b>');
+
+  // List items: - item → bullet
+  result = result.replace(/^[-*]\s+/gm, '• ');
+
+  // Restore inline code
+  result = result.replace(/\x00INLINE(\d+)\x00/g, (_, i) =>
+    `<code>${_escHtml(inlineCodes[Number(i)])}</code>`
+  );
+
+  // Restore code blocks
+  result = result.replace(/\x00CODEBLOCK(\d+)\x00/g, (_, i) =>
+    `<pre>${_escHtml(codeBlocks[Number(i)])}</pre>`
+  );
+
+  return result;
+}
+
+/** Convert Telegram entities to Markdown */
+function _telegramEntitiesToMarkdown(text: string, entities: any[]): string {
+  if (!entities || entities.length === 0) return text;
+
+  // Sort entities by offset (descending) so replacements don't shift positions
+  const sorted = [...entities].sort((a, b) => b.offset - a.offset);
+
+  let result = text;
+  for (const e of sorted) {
+    const start = e.offset;
+    const end = e.offset + e.length;
+    const inner = result.slice(start, end);
+
+    let replacement = inner;
+    switch (e.type) {
+      case 'bold': replacement = `**${inner}**`; break;
+      case 'italic': replacement = `_${inner}_`; break;
+      case 'code': replacement = `\`${inner}\``; break;
+      case 'pre': replacement = `\`\`\`\n${inner}\n\`\`\``; break;
+      case 'strikethrough': replacement = `~~${inner}~~`; break;
+      case 'text_link': replacement = `[${inner}](${e.url})`; break;
+      case 'url': replacement = inner; break; // URLs are already plain text
+      // Skip mention, hashtag, etc. — they're fine as-is
+    }
+
+    result = result.slice(0, start) + replacement + result.slice(end);
+  }
+
+  return result;
+}
+
+function _escHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }

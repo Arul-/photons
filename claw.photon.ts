@@ -4,17 +4,18 @@ import path from 'path';
 import { Photon } from '@portel/photon-core';
 
 /**
- * Claw — orchestrates WhatsApp ↔ Claude agent pipeline.
+ * Claw — orchestrates messaging ↔ Claude agent pipeline.
  *
- * Subscribe to WhatsApp groups, route messages to an agent runner,
- * and send responses back. Uses WhatsApp's .on() for event-driven
+ * Subscribe to WhatsApp and Telegram groups, route messages to an agent runner,
+ * and send responses back. Uses channel .on() for event-driven
  * message handling with group and trigger filtering.
  *
- * @version 3.0.0
+ * @version 4.0.0
  * @icon 🦞
- * @tags orchestrator, whatsapp, agent, claw
+ * @tags orchestrator, whatsapp, telegram, agent, claw
  * @stateful
  * @photon whatsapp ./whatsapp.photon.ts
+ * @photon telegram ./telegram.photon.ts
  * @photon router ./agent-router.photon.ts
  * @ui dashboard ./ui/dashboard.html
  */
@@ -22,7 +23,7 @@ export default class Claw extends Photon {
   private running = false;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private sessionMap: Record<string, string> = {}; // folder → sessionId
-  private lastHealth: { ok: boolean; whatsapp: string; runner: string; checkedAt: string } | null = null;
+  private lastHealth: { ok: boolean; whatsapp: string; telegram: string; runner: string; checkedAt: string } | null = null;
   private autoResumeTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Group registry — persisted via this.memory, keyed by canonical group name
@@ -33,6 +34,7 @@ export default class Claw extends Photon {
   private messageLog: Record<string, MessageEntry[]> = {};
   constructor(
     private whatsapp: any,
+    private telegram: any,
     private router: any,
   ) {
     super();
@@ -75,7 +77,13 @@ export default class Claw extends Photon {
 
     // Normal startup — restore persisted state
     const saved = await this.memory.get<Record<string, GroupConfig>>('registry');
-    if (saved) this.registry = saved;
+    if (saved) {
+      // Migrate: existing entries without channel default to 'whatsapp'
+      for (const config of Object.values(saved)) {
+        if (!config.channel) config.channel = 'whatsapp';
+      }
+      this.registry = saved;
+    }
 
     const savedSessions = await this.memory.get<Record<string, string>>('sessionMap');
     if (savedSessions) this.sessionMap = savedSessions;
@@ -96,7 +104,7 @@ export default class Claw extends Photon {
           if (attempts < 5) {
             setTimeout(() => tryResume(attempts + 1), 3000);
           } else {
-            this.emit({ type: 'auto_resume_failed', message: 'WhatsApp not connected after retries' });
+            this.emit({ type: 'auto_resume_failed', message: 'No channels connected after retries' });
           }
         }
       };
@@ -120,8 +128,8 @@ export default class Claw extends Photon {
   }
 
   /**
-   * Start the pipeline: verify WhatsApp connection, subscribe to registered groups.
-   * Streams progress while waiting for WhatsApp to connect.
+   * Start the pipeline: verify channel connections, subscribe to registered groups.
+   * Streams progress while waiting for channels to connect.
    *
    * @title Start Pipeline
    * @openWorld
@@ -131,6 +139,7 @@ export default class Claw extends Photon {
       return 'Already running';
     }
 
+    // ── Check WhatsApp ──
     yield { emit: 'status', message: 'Checking WhatsApp connection...' };
 
     let waStatus = await this.whatsapp.status();
@@ -141,7 +150,7 @@ export default class Claw extends Photon {
         try {
           const connectResult = await this.whatsapp.connect();
           if (connectResult.status === 'qr_pending') {
-            return 'WhatsApp needs QR authentication. Run `photon whatsapp connect` to scan the QR code, then `claw start` again.';
+            yield { emit: 'status', message: 'WhatsApp needs QR authentication. Run `photon whatsapp connect` to scan the QR code.' };
           }
         } catch {
           // connect() may fail transiently — fall through to polling
@@ -160,24 +169,43 @@ export default class Claw extends Photon {
       }
 
       if (waStatus.status !== 'connected') {
-        return `WhatsApp did not connect within 120s (status: ${waStatus.status}). Run \`photon whatsapp connect\` manually, then \`claw start\`.`;
+        yield { emit: 'status', message: `WhatsApp not connected (${waStatus.status}) — Telegram-only groups will still work.` };
       }
     }
 
-    yield { emit: 'status', message: `WhatsApp connected (${waStatus.phone}) — subscribing to groups...` };
+    if (waStatus.status === 'connected') {
+      yield { emit: 'status', message: `WhatsApp connected (${waStatus.phone})` };
 
-    // Auto-seed each group's allowlist with own number if not yet set
-    if (waStatus.phone) {
-      const ownPhone = waStatus.phone.replace(/\D/g, '');
-      let changed = false;
-      for (const config of Object.values(this.registry)) {
-        if (config.allowedSenders.length === 0) {
-          config.allowedSenders = [ownPhone];
-          changed = true;
+      // Auto-seed each WhatsApp group's allowlist with own number if not yet set
+      if (waStatus.phone) {
+        const ownPhone = waStatus.phone.replace(/\D/g, '');
+        let changed = false;
+        for (const config of Object.values(this.registry)) {
+          if (config.channel === 'whatsapp' && config.allowedSenders.length === 0) {
+            config.allowedSenders = [ownPhone];
+            changed = true;
+          }
         }
+        if (changed) await this.memory.set('registry', this.registry);
       }
-      if (changed) await this.memory.set('registry', this.registry);
     }
+
+    // ── Check Telegram ──
+    yield { emit: 'status', message: 'Checking Telegram connection...' };
+    let tgStatus = await this.telegram.status().catch(() => ({ status: 'unavailable' }));
+
+    if (tgStatus.status !== 'connected') {
+      yield { emit: 'status', message: `Telegram not connected (${tgStatus.status}) — WhatsApp-only groups will still work.` };
+    } else {
+      yield { emit: 'status', message: `Telegram connected (@${tgStatus.username})` };
+    }
+
+    // At least one channel must be available
+    if (waStatus.status !== 'connected' && tgStatus.status !== 'connected') {
+      return 'No channels connected. Connect WhatsApp (`photon whatsapp connect`) or Telegram (`photon telegram connect`) first.';
+    }
+
+    yield { emit: 'status', message: 'Subscribing to groups...' };
 
     this.running = true;
     await this.memory.set('running', true);
@@ -189,9 +217,13 @@ export default class Claw extends Photon {
     }, this.settings.heartbeatIntervalMs);
 
     const groupCount = Object.keys(this.registry).length;
-    this.emit({ type: 'started', phone: waStatus.phone, groups: groupCount });
-    yield { emit: 'toast', message: `Pipeline started — ${groupCount} group(s) active`, type: 'success' };
-    return `Started. Phone: ${waStatus.phone}, groups: ${groupCount}`;
+    const channels: string[] = [];
+    if (waStatus.status === 'connected') channels.push(`WhatsApp (${waStatus.phone})`);
+    if (tgStatus.status === 'connected') channels.push(`Telegram (@${tgStatus.username})`);
+
+    this.emit({ type: 'started', channels, groups: groupCount });
+    yield { emit: 'toast', message: `Pipeline started — ${groupCount} group(s) on ${channels.join(', ')}`, type: 'success' };
+    return `Started. Channels: ${channels.join(', ')}, groups: ${groupCount}`;
   }
 
   /**
@@ -219,14 +251,15 @@ export default class Claw extends Photon {
   }
 
   /**
-   * Register a WhatsApp group for agent routing.
-   * Fuzzy-matches the group name from your WhatsApp groups.
+   * Register a group or chat for agent routing.
+   * Searches both WhatsApp and Telegram for a matching group name.
    *
    * @title Register Group
    * @openWorld
-   * @param group WhatsApp group name or partial match {@example "Learn CS"}
+   * @param group Group or chat name (partial match) {@example "Learn CS"}
    * @param trigger Trigger word to activate the agent (empty = participant mode) {@example "@"}
    * @param folders Folder names the agent can access — first is the primary context folder {@example ["lura", "photon"]}
+   * @param channel Force a specific channel ('whatsapp'|'telegram') — auto-detected if omitted {@choice whatsapp, telegram}
    * @param requiresTrigger Only route messages containing the trigger (default: true when trigger is non-empty)
    * @param systemPrompt System prompt prepended to every agent run for this group {@example "You are Lura, a concise personal assistant."}
    * @param agent Agent to use for this group ('claude'|'gemini'|'aider'|'opencode'|'auto') {@example "claude"}
@@ -235,18 +268,64 @@ export default class Claw extends Photon {
     group: string;
     trigger: string;
     folders: string[];
+    channel?: 'whatsapp' | 'telegram';
     requiresTrigger?: boolean;
     systemPrompt?: string;
     agent?: string;
   }): Promise<{ name: string } & GroupConfig> {
-    const waGroups = await this.whatsapp.groups();
     const query = params.group.toLowerCase();
-    const match = waGroups.find((g: any) =>
-      g.name.toLowerCase().includes(query) || g.jid === params.group
-    );
-    if (!match) {
+    let matchName: string | null = null;
+    let matchChannel: 'whatsapp' | 'telegram' = 'whatsapp';
+
+    // If channel is forced, only search that channel
+    if (params.channel === 'telegram') {
+      const tgChats = await this.telegram.groups().catch(() => []);
+      const match = tgChats.find((g: any) =>
+        (g.name || '').toLowerCase().includes(query) || g.chatId === params.group
+      );
+      if (!match) {
+        throw new Error(
+          `No Telegram chat matching "${params.group}". The bot discovers chats from incoming messages — send a message first, or use the numeric chat ID.`
+        );
+      }
+      matchName = match.name;
+      matchChannel = 'telegram';
+    } else if (params.channel === 'whatsapp') {
+      const waGroups = await this.whatsapp.groups();
+      const match = waGroups.find((g: any) =>
+        g.name.toLowerCase().includes(query) || g.jid === params.group
+      );
+      if (!match) {
+        throw new Error(
+          `No WhatsApp group matching "${params.group}". Run 'photon whatsapp groups' to see available groups.`
+        );
+      }
+      matchName = match.name;
+      matchChannel = 'whatsapp';
+    } else {
+      // Auto-detect: search WhatsApp first, then Telegram
+      const waGroups = await this.whatsapp.groups().catch(() => []);
+      const waMatch = waGroups.find((g: any) =>
+        g.name.toLowerCase().includes(query) || g.jid === params.group
+      );
+      if (waMatch) {
+        matchName = waMatch.name;
+        matchChannel = 'whatsapp';
+      } else {
+        const tgChats = await this.telegram.groups().catch(() => []);
+        const tgMatch = tgChats.find((g: any) =>
+          (g.name || '').toLowerCase().includes(query) || g.chatId === params.group
+        );
+        if (tgMatch) {
+          matchName = tgMatch.name;
+          matchChannel = 'telegram';
+        }
+      }
+    }
+
+    if (!matchName) {
       throw new Error(
-        `No group matching "${params.group}". Run 'photon whatsapp groups' to see available groups.`
+        `No group matching "${params.group}" on any channel. Check 'photon whatsapp groups' or 'photon telegram groups'.`
       );
     }
 
@@ -258,18 +337,19 @@ export default class Claw extends Photon {
       allowedSenders: [],
       systemPrompt: params.systemPrompt ?? '',
       agent: params.agent ?? 'claude',
+      channel: matchChannel,
     };
 
-    this.registry[match.name] = config;
+    this.registry[matchName] = config;
     await this.memory.set('registry', this.registry);
 
     // Subscribe immediately if running
     if (this.running) {
-      this._subscribeGroup(match.name, config);
+      this._subscribeGroup(matchName, config);
     }
 
-    this.emit({ type: 'registered', name: match.name, config });
-    return { name: match.name, ...config };
+    this.emit({ type: 'registered', name: matchName, channel: matchChannel, config });
+    return { name: matchName, ...config };
   }
 
   /**
@@ -287,7 +367,8 @@ export default class Claw extends Photon {
 
     const handler = this.handlers.get(name);
     if (handler) {
-      this.whatsapp.off('message', handler);
+      const ch = this._channelFor(this.registry[name]);
+      ch.off('message', handler);
       this.handlers.delete(name);
     }
 
@@ -509,23 +590,39 @@ export default class Claw extends Photon {
   }
 
   /**
-   * List available WhatsApp groups for registration.
+   * List available groups from all connected channels.
    *
    * @title List Groups
    * @readOnly
    * @openWorld
    * @format table
    */
-  async groups(): Promise<Array<{ name: string; registered: boolean; folders?: string[]; trigger?: string }>> {
-    const waGroups = await this.whatsapp.groups();
-    return waGroups.map((g: any) => {
+  async groups(): Promise<Array<{ name: string; channel: string; registered: boolean; folders?: string[]; trigger?: string }>> {
+    const results: Array<{ name: string; channel: string; registered: boolean; folders?: string[]; trigger?: string }> = [];
+
+    const waGroups = await this.whatsapp.groups().catch(() => []);
+    for (const g of waGroups) {
       const config = this.registry[g.name];
-      return {
+      results.push({
         name: g.name,
+        channel: 'whatsapp',
         registered: !!config,
         ...(config ? { folders: config.folders, trigger: config.trigger } : {}),
-      };
-    });
+      });
+    }
+
+    const tgChats = await this.telegram.groups().catch(() => []);
+    for (const g of tgChats) {
+      const config = this.registry[g.name];
+      results.push({
+        name: g.name,
+        channel: 'telegram',
+        registered: !!config,
+        ...(config ? { folders: config.folders, trigger: config.trigger } : {}),
+      });
+    }
+
+    return results;
   }
 
   /**
@@ -540,17 +637,19 @@ export default class Claw extends Photon {
     ok: boolean;
     running: boolean;
     whatsapp: string;
+    telegram: string;
     runner: string;
     checkedAt: string | null;
   }> {
     if (!this.running) {
-      return { ok: false, running: false, whatsapp: 'unknown', runner: 'unknown', checkedAt: null };
+      return { ok: false, running: false, whatsapp: 'unknown', telegram: 'unknown', runner: 'unknown', checkedAt: null };
     }
     if (!this.lastHealth) await this._heartbeat();
     return {
       ok: this.lastHealth?.ok ?? false,
       running: this.running,
       whatsapp: this.lastHealth?.whatsapp ?? 'unknown',
+      telegram: this.lastHealth?.telegram ?? 'unknown',
       runner: this.lastHealth?.runner ?? 'unknown',
       checkedAt: this.lastHealth?.checkedAt ?? null,
     };
@@ -567,6 +666,7 @@ export default class Claw extends Photon {
   async status(): Promise<{
     running: boolean;
     whatsapp: any;
+    telegram: any;
     runner: any;
     groups: Array<{ name: string } & GroupConfig>;
   }> {
@@ -574,14 +674,16 @@ export default class Claw extends Photon {
       try { return await fn(); } catch { return fallback; }
     };
 
-    const [whatsapp, runnerStatus] = await Promise.all([
+    const [whatsapp, telegramStatus, runnerStatus] = await Promise.all([
       safe(() => this.whatsapp.status(), { status: 'unknown' }),
+      safe(() => this.telegram.status(), { status: 'unknown' }),
       safe(() => this.router.status(), { totalActive: 0, totalQueued: 0 }),
     ]);
 
     return {
       running: this.running,
       whatsapp,
+      telegram: telegramStatus,
       runner: runnerStatus,
       groups: Object.entries(this.registry).map(([name, cfg]) => ({ name, ...cfg })),
     };
@@ -631,7 +733,7 @@ export default class Claw extends Photon {
     if (result.status === 'success' && result.output) {
       // Append scheduled run to conversation log
       this._appendConversation(primaryFolder, `[Scheduled] ${prompt}`, result.output, 'System').catch(() => {});
-      await this._sendAgentResponse(groupName, result.output, primaryFolder, result.duration);
+      await this._sendAgentResponse(groupName, config, result.output, primaryFolder, result.duration);
     }
   }
 
@@ -641,10 +743,16 @@ export default class Claw extends Photon {
     }
   }
 
+  /** Get the channel photon instance for a group config */
+  private _channelFor(config: GroupConfig): any {
+    return config.channel === 'telegram' ? this.telegram : this.whatsapp;
+  }
+
   private _subscribeGroup(name: string, config: GroupConfig): void {
+    const ch = this._channelFor(config);
     // Remove existing handler for this group if any
     const existing = this.handlers.get(name);
-    if (existing) this.whatsapp.off('message', existing);
+    if (existing) ch.off('message', existing);
 
     const handler = (msg: any) => {
       if (!this.running) return;
@@ -655,13 +763,17 @@ export default class Claw extends Photon {
 
     const filter: any = { group: name };
     if (config.requiresTrigger) filter.trigger = config.trigger;
-    this.whatsapp.on('message', handler, filter);
+    ch.on('message', handler, filter);
     this.handlers.set(name, handler);
   }
 
   private _unsubscribeAll(): void {
-    for (const handler of this.handlers.values()) {
-      this.whatsapp.off('message', handler);
+    for (const [name, handler] of this.handlers.entries()) {
+      const config = this.registry[name];
+      if (config) {
+        const ch = this._channelFor(config);
+        ch.off('message', handler);
+      }
     }
     this.handlers.clear();
   }
@@ -671,6 +783,7 @@ export default class Claw extends Photon {
 
     const checkedAt = new Date().toISOString();
     let waStatus = 'unknown';
+    let tgStatus = 'unknown';
     let runnerStatus = 'unknown';
     let ok = true;
 
@@ -678,14 +791,29 @@ export default class Claw extends Photon {
       const wa = await this.whatsapp.status();
       waStatus = wa.status;
       if (wa.status !== 'connected') {
-        ok = false;
-        this.emit({ type: 'heartbeat_warn', component: 'whatsapp', status: wa.status });
-        // Don't call connect() here — WhatsApp photon handles its own reconnection.
-        // Calling connect() from heartbeat causes socket races (concurrent connections).
+        // Only warn if there are WhatsApp groups registered
+        const hasWaGroups = Object.values(this.registry).some(c => c.channel === 'whatsapp');
+        if (hasWaGroups) {
+          ok = false;
+          this.emit({ type: 'heartbeat_warn', component: 'whatsapp', status: wa.status });
+        }
       }
     } catch {
-      ok = false;
       waStatus = 'unreachable';
+    }
+
+    try {
+      const tg = await this.telegram.status();
+      tgStatus = tg.status;
+      if (tg.status !== 'connected') {
+        const hasTgGroups = Object.values(this.registry).some(c => c.channel === 'telegram');
+        if (hasTgGroups) {
+          ok = false;
+          this.emit({ type: 'heartbeat_warn', component: 'telegram', status: tg.status });
+        }
+      }
+    } catch {
+      tgStatus = 'unreachable';
     }
 
     try {
@@ -696,18 +824,20 @@ export default class Claw extends Photon {
       runnerStatus = 'unreachable';
     }
 
-    this.lastHealth = { ok, whatsapp: waStatus, runner: runnerStatus, checkedAt };
-    this.emit({ type: 'heartbeat', ok, whatsapp: waStatus, runner: runnerStatus, checkedAt });
+    this.lastHealth = { ok, whatsapp: waStatus, telegram: tgStatus, runner: runnerStatus, checkedAt };
+    this.emit({ type: 'heartbeat', ok, whatsapp: waStatus, telegram: tgStatus, runner: runnerStatus, checkedAt });
   }
 
   private async _handleMessage(name: string, config: GroupConfig, event: {
-    chatJid: string;
+    chatJid?: string;
+    chatId?: string;
     message: {
       sender: string; senderName: string; content: string; fromMe: boolean; timestamp: string;
       type?: string; filePath?: string; media?: { mimetype?: string; caption?: string };
     };
   }): Promise<void> {
     const msg = event.message;
+    const ch = this._channelFor(config);
     const primaryFolder = config.folders[0];
     const agentPrefix = `${this.settings.agentName}: `;
 
@@ -737,6 +867,7 @@ export default class Claw extends Photon {
     this.emit({
       type: 'routing',
       group: name,
+      channel: config.channel,
       folders: config.folders,
       textPreview: msg.content.slice(0, 80),
       messageType: msg.type || 'text',
@@ -744,14 +875,16 @@ export default class Claw extends Photon {
 
     // Quick ACK so the user knows the message was received
     const acks = ['Noted, on it.', 'Got it, thinking...', 'On it.', 'Noted.', 'Working on it...'];
-    const ackResult = await this.whatsapp.send({ chat: name, text: acks[Math.floor(Math.random() * acks.length)] }).catch(() => null);
+    const ackResult = await ch.send({ chat: name, text: acks[Math.floor(Math.random() * acks.length)] }).catch(() => null);
+    // WhatsApp returns key for edit-in-place, Telegram returns messageId
     const ackKey = ackResult?.key ?? null;
+    const ackMessageId = ackResult?.messageId ?? null;
 
-    // Keep typing indicator alive during agent processing (WhatsApp expires it after ~25s)
-    await this.whatsapp.typing({ chat: name, typing: true }).catch(() => {});
+    // Keep typing indicator alive during agent processing
+    await ch.typing({ chat: name, typing: true }).catch(() => {});
     const typingInterval = setInterval(() => {
-      this.whatsapp.typing({ chat: name, typing: true }).catch(() => {});
-    }, 20_000);
+      ch.typing({ chat: name, typing: true }).catch(() => {});
+    }, config.channel === 'telegram' ? 4_000 : 20_000); // Telegram typing expires after ~5s
 
     // Collect addDirs: extra config folders + media dir from attachment
     const addDirs: string[] = config.folders.slice(1);
@@ -776,7 +909,7 @@ export default class Claw extends Photon {
       result = await this.router.run({
         groupFolder: primaryFolder,
         prompt: context,
-        chatJid: event.chatJid,
+        chatJid: event.chatJid || event.chatId,
         agent: config.agent,
         sessionId,
         ...(systemPrompt ? { systemPrompt } : {}),
@@ -784,7 +917,7 @@ export default class Claw extends Photon {
       });
     } finally {
       clearInterval(typingInterval);
-      this.whatsapp.typing({ chat: name, typing: false }).catch(() => {});
+      ch.typing({ chat: name, typing: false }).catch(() => {});
     }
 
     if (result.sessionId) {
@@ -797,14 +930,16 @@ export default class Claw extends Photon {
       this._appendConversation(primaryFolder, msg.content, result.output, msg.senderName).catch((err) => {
         this.emit({ type: 'memory_error', group: name, error: err.message });
       });
-      await this._sendAgentResponse(name, result.output, primaryFolder, result.duration, ackKey);
+      await this._sendAgentResponse(name, config, result.output, primaryFolder, result.duration, ackKey, ackMessageId);
     } else if (result.error) {
       this.emit({ type: 'error', source: 'agent-runner', group: name, error: result.error });
     }
   }
 
   /** Send agent response, editing the ACK message in-place if possible */
-  private async _sendAgentResponse(chat: string, output: string, folder: string, duration: number, ackKey?: any): Promise<void> {
+  private async _sendAgentResponse(chat: string, config: GroupConfig, output: string, folder: string, duration: number, ackKey?: any, ackMessageId?: number | null): Promise<void> {
+    const ch = this._channelFor(config);
+
     // Detect media file references in the output:
     // Patterns: ![alt](path) or bare file paths ending in image/video extensions
     const mediaPattern = /!\[([^\]]*)\]\(([^)]+)\)/g;
@@ -836,24 +971,29 @@ export default class Claw extends Photon {
       }
     }
 
-    // Send text portion — edit the ACK in-place if we have its key, else send fresh
+    // Send text portion — edit the ACK in-place if possible, else send fresh
     if (textOutput.trim()) {
       const prefixed = `${this.settings.agentName}: ${textOutput.trim()}`;
-      if (ackKey) {
-        await this.whatsapp.edit({ key: ackKey, text: prefixed }).catch(async () => {
-          // Fall back to a new message if edit fails (e.g. too old, unsupported client)
-          await this.whatsapp.send({ chat, text: prefixed });
+
+      if (config.channel === 'whatsapp' && ackKey) {
+        // WhatsApp: edit via message key
+        await ch.edit({ key: ackKey, text: prefixed }).catch(async () => {
+          await ch.send({ chat, text: prefixed });
         });
-        ackKey = null; // consumed — media attachments below go as separate messages
+      } else if (config.channel === 'telegram' && ackMessageId) {
+        // Telegram: edit via message ID
+        await ch.edit({ chat, messageId: ackMessageId, text: prefixed }).catch(async () => {
+          await ch.send({ chat, text: prefixed });
+        });
       } else {
-        await this.whatsapp.send({ chat, text: prefixed });
+        await ch.send({ chat, text: prefixed });
       }
     }
 
     // Send each media file
     for (const media of mediaFiles) {
       try {
-        await this.whatsapp.media({
+        await ch.media({
           chat,
           url: media.path,
           type: media.type,
@@ -861,14 +1001,14 @@ export default class Claw extends Photon {
         });
       } catch (err: any) {
         this.emit({ type: 'error', source: 'media_send', folder, error: err.message, path: media.path });
-        // Fallback: send the path as text so the user knows something was generated
-        await this.whatsapp.send({ chat, text: `[Media file: ${media.path}]` }).catch(() => {});
+        await ch.send({ chat, text: `[Media file: ${media.path}]` }).catch(() => {});
       }
     }
 
     this.emit({
       type: 'replied',
       group: chat,
+      channel: config.channel,
       folder,
       duration,
       outputLength: output.length,
@@ -1179,6 +1319,8 @@ interface GroupConfig {
   systemPrompt: string;
   /** Agent to use: 'claude' | 'gemini' | 'aider' | 'opencode' | 'auto' */
   agent: string;
+  /** Channel this group belongs to: 'whatsapp' | 'telegram' */
+  channel: 'whatsapp' | 'telegram';
 }
 
 interface MessageEntry {
