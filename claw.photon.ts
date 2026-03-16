@@ -225,6 +225,9 @@ export default class Claw extends Photon {
 
     this._subscribeAll();
 
+    // Drain pending messages that arrived while claw was stopped
+    await this._drainPending();
+
     this.heartbeatTimer = setInterval(() => {
       this._heartbeat().catch(() => {});
     }, this.settings.heartbeatIntervalMs);
@@ -763,6 +766,48 @@ export default class Claw extends Photon {
   private _subscribeAll(): void {
     for (const [name, config] of Object.entries(this.registry)) {
       this._subscribeGroup(name, config);
+    }
+  }
+
+  /** Drain pending messages from all channels — catches messages that arrived while stopped */
+  private async _drainPending(): Promise<void> {
+    const channels = new Set<string>();
+    for (const config of Object.values(this.registry)) {
+      channels.add(config.channel || 'whatsapp');
+    }
+
+    for (const channelName of channels) {
+      const ch = channelName === 'telegram' ? this.telegram : this.whatsapp;
+      try {
+        const pending = await ch.pending();
+        if (!pending || pending.length === 0) continue;
+
+        this.emit({ type: 'draining', channel: channelName, count: pending.length });
+
+        for (const { chatId, message } of pending) {
+          // Find matching group config for this chatId
+          for (const [name, config] of Object.entries(this.registry)) {
+            if ((config.channel || 'whatsapp') !== channelName) continue;
+
+            // Match by numeric chatId or resolved name
+            const isMatch = /^-?\d+$/.test(name)
+              ? name === chatId
+              : true; // Non-numeric names matched by the listener, but for drain we check all
+
+            if (!isMatch) continue;
+
+            // Apply trigger filter
+            if (config.requiresTrigger && config.trigger && !message.content.includes(config.trigger)) continue;
+
+            this._handleMessage(name, config, { chatId, message }).catch((err) => {
+              this.emit({ type: 'drain_error', group: name, error: err.message });
+            });
+            break; // One group match per message
+          }
+        }
+      } catch {
+        // Channel might not be connected — skip
+      }
     }
   }
 
