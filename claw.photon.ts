@@ -18,6 +18,7 @@ import { Photon } from '@portel/photon-core';
  * @photon whatsapp ./whatsapp.photon.ts
  * @photon telegram ./telegram.photon.ts
  * @photon router ./agent-router.photon.ts
+ * @photon courier ./courier.photon.ts
  * @ui dashboard ./ui/dashboard.html
  */
 export default class Claw extends Photon {
@@ -33,10 +34,18 @@ export default class Claw extends Photon {
   private handlers: Map<string, (msg: any) => void> = new Map();
   // Message log per group name for context building
   private messageLog: Record<string, MessageEntry[]> = {};
+
+  // Processing queue — idle/wake loop
+  private _queue: QueueItem[] = [];
+  private _queueWake: (() => void) | null = null;
+  private _loopRunning = false;
+  private _currentItem: QueueItem | null = null;
+
   constructor(
     private whatsapp: any,
     private telegram: any,
     private router: any,
+    private courier: any,
   ) {
     super();
   }
@@ -65,11 +74,20 @@ export default class Claw extends Photon {
       this.registry = old.registry || {};
       this.messageLog = old.messageLog || {};
       this.handlers = old.handlers || new Map();
+      this._queue = old._queue || [];
+      this._loopRunning = old._loopRunning || false;
 
       if (old.heartbeatTimer) {
         this.heartbeatTimer = old.heartbeatTimer;
         old.heartbeatTimer = null;
       }
+
+      // Stop old processing loop and restart ours
+      if (old._loopRunning) {
+        old._loopRunning = false;
+        if (old._queueWake) old._queueWake();
+      }
+      if (this.running) this._startProcessingLoop();
 
       old.handlers = null;
       this.emit({ type: 'hot_reload_transferred', running: this.running });
@@ -116,6 +134,7 @@ export default class Claw extends Photon {
   async onShutdown(ctx?: { reason?: string }): Promise<void> {
     if (ctx?.reason === 'hot-reload') return;
     this._unsubscribeAll();
+    this._stopProcessingLoop();
     if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; }
     this.running = false;
   }
@@ -223,6 +242,7 @@ export default class Claw extends Photon {
     this.running = true;
     await this.memory.set('running', true);
 
+    this._startProcessingLoop();
     this._subscribeAll();
 
     // Drain pending messages that arrived while claw was stopped
@@ -257,6 +277,7 @@ export default class Claw extends Photon {
     }
 
     this._unsubscribeAll();
+    this._stopProcessingLoop();
     if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; }
     this.running = false;
     await this.memory.set('running', false);
@@ -279,6 +300,7 @@ export default class Claw extends Photon {
    * @param requiresTrigger Only route messages containing the trigger (default: true when trigger is non-empty)
    * @param systemPrompt System prompt prepended to every agent run for this group {@example "You are Lura, a concise personal assistant."}
    * @param agent Agent to use for this group ('claude'|'gemini'|'aider'|'opencode'|'auto') {@example "claude"}
+   * @param schedule Delivery schedule via courier (omit for real-time) {@choice @5m, @15m, @30m, @hourly, @daily}
    */
   async register(params: {
     group: string;
@@ -288,6 +310,7 @@ export default class Claw extends Photon {
     requiresTrigger?: boolean;
     systemPrompt?: string;
     agent?: string;
+    schedule?: string;
   }): Promise<{ name: string } & GroupConfig> {
     const query = params.group.toLowerCase();
     let matchName: string | null = null;
@@ -364,6 +387,7 @@ export default class Claw extends Photon {
       systemPrompt: params.systemPrompt ?? '',
       agent: params.agent ?? 'claude',
       channel: matchChannel,
+      schedule: params.schedule,
     };
 
     this.registry[matchName] = config;
@@ -391,11 +415,21 @@ export default class Claw extends Photon {
 
     if (!name) throw new Error(`No group matching "${params.group}"`);
 
-    const handler = this.handlers.get(name);
-    if (handler) {
-      const ch = this._channelFor(this.registry[name]);
-      ch.off('message', handler);
-      this.handlers.delete(name);
+    const config = this.registry[name];
+
+    // Unsubscribe: direct handler or courier
+    if (config.schedule) {
+      await this.courier.unsubscribe({
+        channel: config.channel || 'whatsapp',
+        group: name,
+      }).catch(() => {});
+    } else {
+      const handler = this.handlers.get(name);
+      if (handler) {
+        const ch = this._channelFor(config);
+        ch.off('message', handler);
+        this.handlers.delete(name);
+      }
     }
 
     delete this.registry[name];
@@ -414,6 +448,7 @@ export default class Claw extends Photon {
    * @param requiresTrigger Override trigger requirement
    * @param systemPrompt System prompt for this group's agent {@example "You are Lura, a concise personal assistant."}
    * @param agent Switch to a different agent ('claude'|'gemini'|'aider'|'opencode'|'auto') {@example "gemini"}
+   * @param schedule Delivery schedule via courier (empty string to remove, omit to keep) {@choice @5m, @15m, @30m, @hourly, @daily}
    */
   async configure(params: {
     group: string;
@@ -422,6 +457,7 @@ export default class Claw extends Photon {
     requiresTrigger?: boolean;
     systemPrompt?: string;
     agent?: string;
+    schedule?: string;
   }): Promise<{ name: string } & GroupConfig> {
     const query = params.group.toLowerCase();
     const name = Object.keys(this.registry).find(k => k.toLowerCase().includes(query));
@@ -439,6 +475,7 @@ export default class Claw extends Photon {
     if (params.folders !== undefined) config.folders = params.folders;
     if (params.systemPrompt !== undefined) config.systemPrompt = params.systemPrompt;
     if (params.agent !== undefined) config.agent = params.agent;
+    if (params.schedule !== undefined) config.schedule = params.schedule || undefined;
 
     await this.memory.set('registry', this.registry);
 
@@ -694,16 +731,19 @@ export default class Claw extends Photon {
     whatsapp: any;
     telegram: any;
     runner: any;
+    courier: any;
+    queue: { depth: number; current: string | null };
     groups: Array<{ name: string } & GroupConfig>;
   }> {
     const safe = async (fn: () => Promise<any>, fallback: any = null) => {
       try { return await fn(); } catch { return fallback; }
     };
 
-    const [whatsapp, telegramStatus, runnerStatus] = await Promise.all([
+    const [whatsapp, telegramStatus, runnerStatus, courierStatus] = await Promise.all([
       safe(() => this.whatsapp.status(), { status: 'unknown' }),
       safe(() => this.telegram.status(), { status: 'unknown' }),
       safe(() => this.router.status(), { totalActive: 0, totalQueued: 0 }),
+      safe(() => this.courier.status(), { subscriptions: 0, inboxSizes: {} }),
     ]);
 
     return {
@@ -711,6 +751,11 @@ export default class Claw extends Photon {
       whatsapp,
       telegram: telegramStatus,
       runner: runnerStatus,
+      courier: courierStatus,
+      queue: {
+        depth: this._queue.length,
+        current: this._currentItem?.groupName ?? null,
+      },
       groups: Object.entries(this.registry).map(([name, cfg]) => ({ name, ...cfg })),
     };
   }
@@ -817,25 +862,51 @@ export default class Claw extends Photon {
   }
 
   private _subscribeGroup(name: string, config: GroupConfig): void {
-    const ch = this._channelFor(config);
-    // Remove existing handler for this group if any
+    // Remove existing direct handler if any
     const existing = this.handlers.get(name);
-    if (existing) ch.off('message', existing);
+    if (existing) {
+      const ch = this._channelFor(config);
+      ch.off('message', existing);
+      this.handlers.delete(name);
+    }
 
-    const handler = (msg: any) => {
-      if (!this.running) return;
-      this._handleMessage(name, config, msg).catch((err) => {
-        this.emit({ type: 'handle_error', group: name, error: err.message });
+    // Remove existing courier subscription if any (handles mode switching)
+    this.courier.unsubscribe({
+      channel: config.channel || 'whatsapp',
+      group: name,
+    }).catch(() => {});
+
+    if (config.schedule) {
+      // ── Scheduled delivery via Courier ──
+      this.courier.subscribe({
+        channel: config.channel || 'whatsapp',
+        group: name,
+        schedule: config.schedule,
+        trigger: config.requiresTrigger ? config.trigger : undefined,
+        ack: 'Got it, will process {time}',
+        handler: (batch: any[]) => {
+          this._enqueue({ groupName: name, config, batch });
+        },
+      }).catch((err: any) => {
+        this.emit({ type: 'courier_subscribe_error', group: name, error: err.message });
       });
-    };
+    } else {
+      // ── Real-time: direct channel subscription → enqueue ──
+      const ch = this._channelFor(config);
+      const handler = (msg: any) => {
+        if (!this.running) return;
+        this._enqueue({ groupName: name, config, event: msg });
+      };
 
-    const filter: any = { group: name };
-    if (config.requiresTrigger) filter.trigger = config.trigger;
-    ch.on('message', handler, filter);
-    this.handlers.set(name, handler);
+      const filter: any = { group: name };
+      if (config.requiresTrigger) filter.trigger = config.trigger;
+      ch.on('message', handler, filter);
+      this.handlers.set(name, handler);
+    }
   }
 
   private _unsubscribeAll(): void {
+    // Unsubscribe direct channel handlers
     for (const [name, handler] of this.handlers.entries()) {
       const config = this.registry[name];
       if (config) {
@@ -844,6 +915,146 @@ export default class Claw extends Photon {
       }
     }
     this.handlers.clear();
+
+    // Unsubscribe courier-managed groups
+    for (const [name, config] of Object.entries(this.registry)) {
+      if (config.schedule) {
+        this.courier.unsubscribe({
+          channel: config.channel || 'whatsapp',
+          group: name,
+        }).catch(() => {});
+      }
+    }
+  }
+
+  // ─── Processing Loop ───────────────────────────────────────────
+
+  private _enqueue(item: QueueItem): void {
+    this._queue.push(item);
+    if (this._queueWake) {
+      this._queueWake();
+      this._queueWake = null;
+    }
+  }
+
+  private _startProcessingLoop(): void {
+    if (this._loopRunning) return;
+    this._loopRunning = true;
+
+    const loop = async () => {
+      while (this._loopRunning) {
+        if (this._queue.length === 0) {
+          // Idle — wait for wake signal
+          await new Promise<void>(resolve => { this._queueWake = resolve; });
+          if (!this._loopRunning) break;
+        }
+
+        const item = this._queue.shift();
+        if (!item) continue;
+
+        this._currentItem = item;
+        try {
+          if (item.batch && item.batch.length > 0) {
+            await this._handleBatch(item.groupName, item.config, item.batch);
+          } else if (item.event) {
+            await this._handleMessage(item.groupName, item.config, item.event);
+          }
+        } catch (err: any) {
+          this.emit({ type: 'handle_error', group: item.groupName, error: err.message });
+        }
+        this._currentItem = null;
+      }
+    };
+
+    loop().catch(() => { this._loopRunning = false; });
+  }
+
+  private _stopProcessingLoop(): void {
+    this._loopRunning = false;
+    if (this._queueWake) {
+      this._queueWake();
+      this._queueWake = null;
+    }
+  }
+
+  /** Handle a batch of messages from courier scheduled delivery */
+  private async _handleBatch(name: string, config: GroupConfig, batch: any[]): Promise<void> {
+    const ch = this._channelFor(config);
+    const primaryFolder = config.folders[0];
+
+    // Log all batch messages
+    for (const entry of batch) {
+      const msg = entry.message;
+      if (!this.messageLog[name]) this.messageLog[name] = [];
+      this.messageLog[name].push({
+        sender: msg.senderName || msg.sender || 'Unknown',
+        content: msg.content || '',
+        timestamp: msg.timestamp || new Date(entry.receivedAt).toISOString(),
+        fromMe: msg.fromMe,
+      });
+    }
+
+    // Trim log
+    const log = this.messageLog[name];
+    if (log && log.length > this.settings.maxMessageLog) {
+      log.splice(0, log.length - this.settings.maxMessageLog);
+    }
+
+    // Build combined context from the batch
+    const batchMessages = batch.map(entry => {
+      const msg = entry.message;
+      return `<message sender="${this._esc(msg.senderName || msg.sender || 'Unknown')}" time="${msg.timestamp || new Date(entry.receivedAt).toISOString()}">${this._esc(msg.content || '')}</message>`;
+    });
+
+    const context = `<batch count="${batch.length}">\n${batchMessages.join('\n')}\n</batch>\n\n<instruction>You received ${batch.length} message(s) that were batched for scheduled delivery (${config.schedule}). Respond to the conversation as a whole — provide a single cohesive response addressing the key points.</instruction>`;
+
+    this.emit({
+      type: 'routing_batch',
+      group: name,
+      channel: config.channel,
+      count: batch.length,
+      schedule: config.schedule,
+    });
+
+    // Send typing + process
+    await ch.typing({ chat: name, typing: true }).catch(() => {});
+
+    const sessionKey = `${config.agent}:${primaryFolder}`;
+    const sessionId = this.sessionMap[sessionKey] ?? (config.agent === 'claude' ? this.sessionMap[primaryFolder] : undefined);
+
+    let systemPrompt = config.systemPrompt || '';
+    this._ensureMemoryDir(primaryFolder);
+    const memoryCtx = await this._buildMemoryPrompt(primaryFolder);
+    if (memoryCtx) {
+      systemPrompt = systemPrompt ? `${systemPrompt}\n\n${memoryCtx}` : memoryCtx;
+    }
+
+    let result: any;
+    try {
+      result = await this.router.run({
+        groupFolder: primaryFolder,
+        prompt: context,
+        agent: config.agent,
+        sessionId,
+        ...(systemPrompt ? { systemPrompt } : {}),
+        ...(config.folders.slice(1).length > 0 ? { addDirs: config.folders.slice(1) } : {}),
+      });
+    } finally {
+      ch.typing({ chat: name, typing: false }).catch(() => {});
+    }
+
+    if (result.sessionId) {
+      this.sessionMap[`${config.agent}:${primaryFolder}`] = result.sessionId;
+      await this.memory.set('sessionMap', this.sessionMap);
+    }
+
+    if (result.status === 'success' && result.output) {
+      const batchSummary = batch.map(e => e.message?.content || '').join(' | ').slice(0, 200);
+      this._appendConversation(primaryFolder, `[Batch x${batch.length}] ${batchSummary}`, result.output, 'Batch').catch(() => {});
+      await this._sendAgentResponse(name, config, result.output, primaryFolder, result.duration);
+    } else if (result.error) {
+      this.emit({ type: 'error', source: 'agent-runner', group: name, error: result.error });
+    }
   }
 
   private async _heartbeat(): Promise<void> {
@@ -894,6 +1105,119 @@ export default class Claw extends Photon {
 
     this.lastHealth = { ok, whatsapp: waStatus, telegram: tgStatus, runner: runnerStatus, checkedAt };
     this.emit({ type: 'heartbeat', ok, whatsapp: waStatus, telegram: tgStatus, runner: runnerStatus, checkedAt });
+
+    // Detect group renames
+    await this._detectRenames().catch(() => {});
+  }
+
+  /** Detect group/channel renames by comparing current names against registry keys.
+   *  Channel photons maintain id→name mappings. We fetch the current group list
+   *  and build an id→name map, then check if any registered name's underlying ID
+   *  now points to a different name. */
+  private async _detectRenames(): Promise<void> {
+    // Build id→name maps per channel
+    const idToName: Record<string, Map<string, string>> = {
+      telegram: new Map(),
+      whatsapp: new Map(),
+    };
+    const nameToId: Record<string, Map<string, string>> = {
+      telegram: new Map(),
+      whatsapp: new Map(),
+    };
+
+    const tgChats = await this.telegram.groups().catch(() => []);
+    for (const g of tgChats) {
+      const id = String(g.chatId || '');
+      const name = g.name || '';
+      if (id && name) {
+        idToName.telegram.set(id, name);
+        nameToId.telegram.set(name.toLowerCase(), id);
+      }
+    }
+
+    const waGroups = await this.whatsapp.groups().catch(() => []);
+    for (const g of waGroups) {
+      const id = g.jid || '';
+      const name = g.name || '';
+      if (id && name) {
+        idToName.whatsapp.set(id, name);
+        nameToId.whatsapp.set(name.toLowerCase(), id);
+      }
+    }
+
+    // Check each registered group
+    const renames: Array<{ oldName: string; newName: string; config: GroupConfig }> = [];
+
+    for (const [regName, config] of Object.entries(this.registry)) {
+      const ch = config.channel || 'whatsapp';
+
+      // Skip numeric ID registrations (Telegram chat IDs used as names)
+      if (/^-?\d+$/.test(regName)) continue;
+
+      // Check if this name still exists
+      const existingId = nameToId[ch]?.get(regName.toLowerCase());
+      if (existingId) continue; // Name still valid, no rename
+
+      // Name is gone — try to find the ID that was previously associated with this name
+      // by checking if any current name's ID resolves to a group we know about
+      // Heuristic: look through all IDs and see if one has a new name that isn't in our registry
+      for (const [id, currentName] of (idToName[ch] || new Map())) {
+        // If this current name is already registered, skip
+        if (this.registry[currentName]) continue;
+
+        // This ID has a name that's not in our registry — could be a rename
+        // Confirm by checking if the channel's listener filters still reference our old name
+        // The channel photons auto-patch filters on rename, so if we find an unregistered name
+        // on the same channel where a registered name disappeared, it's very likely a rename
+        // Additional confirmation: only one name disappeared and one appeared
+        renames.push({ oldName: regName, newName: currentName, config });
+        break; // One rename per missing name
+      }
+    }
+
+    // Apply renames
+    for (const { oldName, newName, config } of renames) {
+      await this._applyRename(oldName, newName, config);
+    }
+  }
+
+  /** Apply a group rename across all internal state */
+  private async _applyRename(oldName: string, newName: string, config: GroupConfig): Promise<void> {
+    // Move registry entry
+    this.registry[newName] = config;
+    delete this.registry[oldName];
+
+    // Move handler
+    const handler = this.handlers.get(oldName);
+    if (handler) {
+      this.handlers.set(newName, handler);
+      this.handlers.delete(oldName);
+    }
+
+    // Move message log
+    if (this.messageLog[oldName]) {
+      this.messageLog[newName] = this.messageLog[oldName];
+      delete this.messageLog[oldName];
+    }
+
+    // Update queued items
+    for (const item of this._queue) {
+      if (item.groupName === oldName) item.groupName = newName;
+    }
+
+    // Re-subscribe through courier if scheduled
+    if (config.schedule) {
+      await this.courier.unsubscribe({
+        channel: config.channel || 'whatsapp',
+        group: oldName,
+      }).catch(() => {});
+      this._subscribeGroup(newName, config);
+    }
+
+    // Persist
+    await this.memory.set('registry', this.registry);
+
+    this.emit({ type: 'group:renamed', oldName, newName, channel: config.channel });
   }
 
   private async _handleMessage(name: string, config: GroupConfig, event: {
@@ -1388,6 +1712,8 @@ interface GroupConfig {
   agent: string;
   /** Channel this group belongs to: 'whatsapp' | 'telegram' */
   channel: 'whatsapp' | 'telegram';
+  /** Delivery schedule via courier (e.g. '@30m', '@hourly'). Omit for real-time. */
+  schedule?: string;
 }
 
 interface MessageEntry {
@@ -1395,4 +1721,11 @@ interface MessageEntry {
   content: string;
   timestamp: string;
   fromMe?: boolean;
+}
+
+interface QueueItem {
+  groupName: string;
+  config: GroupConfig;
+  event?: any;       // single message from direct channel subscription
+  batch?: any[];     // batch of messages from courier scheduled delivery
 }

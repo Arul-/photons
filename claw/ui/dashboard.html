@@ -174,6 +174,11 @@
       padding: 1px 6px; border-radius: 3px; font-size: 11px; color: var(--text-secondary);
     }
 
+    .schedule-badge {
+      font-family: monospace; background: var(--purple-dim); color: var(--purple);
+      padding: 1px 6px; border-radius: 3px; font-size: 11px; font-weight: 500;
+    }
+
     /* ── Detail Panel (right) ── */
     .detail { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
@@ -292,8 +297,11 @@
   <!-- Stats -->
   <div class="stats-bar">
     <div class="stat"><span class="dot" style="background:var(--green)"></span> WhatsApp <span class="value" id="waStatus">unknown</span></div>
+    <div class="stat"><span class="dot" style="background:var(--blue)"></span> Telegram <span class="value" id="tgStatus">unknown</span></div>
     <div class="stat">Runner <span class="value" id="runnerStatus">—</span></div>
+    <div class="stat">Courier <span class="value" id="courierStatus">—</span></div>
     <div class="stat">Groups <span class="value" id="groupCountStat">0</span></div>
+    <div class="stat" id="queueStat" style="display:none">Queue <span class="value" id="queueDepth">0</span></div>
   </div>
 
   <!-- Main -->
@@ -356,10 +364,14 @@
     let state = {
       running: false,
       whatsapp: null,
+      telegram: null,
       runner: null,
+      courier: null,
+      queue: { depth: 0, current: null },
       groups: [],
       health: null,
       selectedGroup: null,
+      _prevGroupNames: new Set(),
     };
 
     const $ = id => document.getElementById(id);
@@ -417,6 +429,9 @@
       const waStatus = state.whatsapp?.status || 'unknown';
       $('waStatus').textContent = waStatus;
 
+      const tgStatus = state.telegram?.status || 'unknown';
+      $('tgStatus').textContent = tgStatus;
+
       const runner = state.runner;
       if (runner && typeof runner === 'object') {
         $('runnerStatus').textContent = 'active:' + (runner.totalActive || 0) + ' queued:' + (runner.totalQueued || 0);
@@ -424,7 +439,24 @@
         $('runnerStatus').textContent = '—';
       }
 
+      const courier = state.courier;
+      if (courier && typeof courier === 'object') {
+        $('courierStatus').textContent = courier.subscriptions + ' sub(s)';
+      } else {
+        $('courierStatus').textContent = '—';
+      }
+
       $('groupCountStat').textContent = state.groups.length;
+
+      // Queue depth indicator
+      const qDepth = state.queue?.depth || 0;
+      const qStat = $('queueStat');
+      if (qDepth > 0) {
+        qStat.style.display = '';
+        $('queueDepth').textContent = qDepth + (state.queue?.current ? ' (' + state.queue.current + ')' : '');
+      } else {
+        qStat.style.display = 'none';
+      }
     }
 
     function renderGroups() {
@@ -447,6 +479,7 @@
           '</div>' +
           '<div class="group-card-meta">' +
             (g.trigger ? '<span class="trigger-tag">' + escapeHtml(g.trigger) + '</span>' : '<span style="color:var(--text-muted)">participant mode</span>') +
+            (g.schedule ? ' <span class="schedule-badge">' + escapeHtml(g.schedule) + '</span>' : '') +
             '<span>' + (g.folders || []).length + ' folder(s)</span>' +
           '</div>' +
         '</div>';
@@ -480,6 +513,9 @@
         '</div></div>' +
         '<div class="config-item"><div class="config-label">Agent</div><div class="config-value"><span class="agent-badge ' + (g.agent || 'claude') + '">' + (g.agent || 'claude') + '</span></div></div>' +
         '<div class="config-item"><div class="config-label">Folders</div><div class="config-value"><div class="folder-list">' + (folders || '<span style="color:var(--text-muted)">None</span>') + '</div></div></div>' +
+        '<div class="config-item"><div class="config-label">Delivery</div><div class="config-value">' +
+          (g.schedule ? '<span class="schedule-badge">' + escapeHtml(g.schedule) + '</span> (via courier)' : 'Real-time') +
+        '</div></div>' +
         '<div class="config-item"><div class="config-label">Added</div><div class="config-value">' + (g.addedAt ? timeAgo(g.addedAt) : '—') + '</div></div>' +
         (g.systemPrompt ? '<div class="config-item" style="grid-column: span 2;"><div class="config-label">System Prompt</div><div class="config-value" style="font-size: 13px; color: var(--text-secondary); line-height: 1.4;">' + escapeHtml(g.systemPrompt) + '</div></div>' : '');
 
@@ -514,9 +550,30 @@
         const raw = await window.photon.callTool('status', {});
         const data = parseMCP(raw);
         if (data && typeof data === 'object') {
+          // Detect renames before updating state
+          const newNames = new Set((data.groups || []).map(g => g.name));
+          if (state._prevGroupNames.size > 0) {
+            for (const oldName of state._prevGroupNames) {
+              if (!newNames.has(oldName)) {
+                // Old name gone — check if a new name appeared
+                for (const newName of newNames) {
+                  if (!state._prevGroupNames.has(newName)) {
+                    toast('Group renamed: ' + oldName + ' → ' + newName, 'info');
+                    if (state.selectedGroup === oldName) state.selectedGroup = newName;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+          state._prevGroupNames = newNames;
+
           state.running = data.running || false;
           state.whatsapp = data.whatsapp || null;
+          state.telegram = data.telegram || null;
           state.runner = data.runner || null;
+          state.courier = data.courier || null;
+          state.queue = data.queue || { depth: 0, current: null };
           state.groups = data.groups || [];
           renderHeader();
           renderGroups();
@@ -621,7 +678,10 @@
         if ('running' in data && 'groups' in data) {
           state.running = data.running || false;
           state.whatsapp = data.whatsapp || null;
+          state.telegram = data.telegram || null;
           state.runner = data.runner || null;
+          state.courier = data.courier || null;
+          state.queue = data.queue || { depth: 0, current: null };
           state.groups = data.groups || [];
           renderHeader();
           renderGroups();
