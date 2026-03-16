@@ -20,6 +20,7 @@ const MAX_MESSAGE_LENGTH = 4096;
  * @icon 🤖
  * @tags telegram, messaging, nanoclaw
  * @stateful
+ * @noworker
  */
 export default class Telegram extends Photon {
   protected settings = {
@@ -105,6 +106,13 @@ export default class Telegram extends Photon {
 
       this.emit({ type: 'hot_reload_transferred' });
       return;
+    }
+
+    // Restore persisted chat index
+    const savedChats = await this.memory.get<Record<string, string>>('knownChats');
+    if (savedChats) {
+      this.knownChats = savedChats;
+      this._rebuildChatIndex();
     }
 
     // Normal startup — auto-connect if token saved
@@ -468,6 +476,14 @@ export default class Telegram extends Photon {
    * @format table
    */
   async groups(): Promise<Array<{ chatId: string; name: string }>> {
+    // Read-through: if in-memory is empty, try restoring from disk
+    if (Object.keys(this.knownChats).length === 0) {
+      const saved = await this.memory.get<Record<string, string>>('knownChats');
+      if (saved) {
+        this.knownChats = saved;
+        this._rebuildChatIndex();
+      }
+    }
     return Object.entries(this.knownChats).map(([chatId, name]) => ({ chatId, name }));
   }
 
@@ -711,6 +727,7 @@ export default class Telegram extends Photon {
     if (previousName !== chatName) {
       this.knownChats[chatId] = chatName;
       this._rebuildChatIndex();
+      this.memory.set('knownChats', this.knownChats).catch(() => {});
 
       if (previousName) {
         // Name changed on a known chat — notify subscribers

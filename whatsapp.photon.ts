@@ -36,6 +36,7 @@ const LEGACY_MEDIA_DIR = path.join(os.homedir(), '.photon', 'data', 'whatsapp', 
  * @icon 💬
  * @tags whatsapp, messaging, nanoclaw
  * @stateful
+ * @noworker
  * @dependencies @whiskeysockets/baileys@^7.0.0-rc.9, pino@^9.0.0
  * @ui dashboard ./ui/dashboard.html
  */
