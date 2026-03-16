@@ -15,10 +15,10 @@ import { Photon } from '@portel/photon-core';
  * @tags orchestrator, whatsapp, telegram, agent, claw
  * @stateful
  * @noworker
- * @photon whatsapp ./whatsapp.photon.ts
- * @photon telegram ./telegram.photon.ts
- * @photon router ./agent-router.photon.ts
- * @photon courier ./courier.photon.ts
+ * @photon whatsapp whatsapp
+ * @photon telegram telegram
+ * @photon router agent-router
+ * @photon courier courier
  * @ui dashboard ./ui/dashboard.html
  */
 export default class Claw extends Photon {

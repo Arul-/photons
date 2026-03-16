@@ -1,4 +1,5 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import { Photon } from '@portel/photon-core';
@@ -37,7 +38,7 @@ export default class Courier extends Photon {
 
   private get inboxDir(): string {
     if (this._photonFilePath) return this.storage('inbox');
-    return path.join(require('os').homedir(), '.photon', 'data', 'courier', 'inbox');
+    return path.join(os.homedir(), '.photon', 'data', 'courier', 'inbox');
   }
 
   private get cursorsPath(): string {
