@@ -4,7 +4,8 @@ import { Photon } from '@portel/photon-core';
  * Chat — browser-based messaging channel for testing claw pipelines.
  *
  * Wire-compatible with WhatsApp/Telegram channel interface.
- * No external dependencies — runs entirely in-process.
+ * Each group = separate instance (auto-persisted by @stateful).
+ * Default instance acts as router.
  *
  * @version 1.0.0
  * @icon 💬
@@ -14,42 +15,47 @@ import { Photon } from '@portel/photon-core';
  * @ui chat ./chat/ui/chat.html
  */
 export default class Chat extends Photon {
-  /** Group registry — auto-persisted by @stateful. */
-  chatGroups: Record<string, { name: string; messages: Message[]; createdAt: string }> = {};
+  /** Group name — set when instance is created. */
+  name = '';
+  /** Messages — auto-persisted per instance by @stateful. */
+  messages: Message[] = [];
 
-  protected settings = {
-    defaultGroup: 'General',
-  };
+  protected settings = { defaultGroup: 'General' };
 
   /** @title Connect */
   async connect() {
-    if (!Object.keys(this.chatGroups).length) {
-      this._addGroup(this.settings.defaultGroup);
-    }
+    const groups = await this._groupNames();
+    if (!groups.length) await this._createGroup(this.settings.defaultGroup);
     return { status: 'connected', message: 'Chat channel ready' };
   }
 
   /** @title Status @readOnly */
   async status() {
-    return { status: 'connected', groups: Object.keys(this.chatGroups).length };
+    return { status: 'connected', groups: (await this._groupNames()).length };
   }
 
   /** @title Groups @readOnly */
   async groups() {
-    return Object.entries(this.chatGroups).map(([id, g]) => ({ name: g.name, chatId: id }));
+    const result: { name: string; chatId: string }[] = [];
+    for await (const inst of this.allInstances()) {
+      if (inst.name !== 'default' && inst.state?.name) {
+        result.push({ name: inst.state.name, chatId: inst.name });
+      }
+    }
+    return result;
   }
 
   /** @title Create Group @param name Group name */
   async create(params: { name: string }) {
-    const id = this._addGroup(params.name);
-    return { id, name: params.name };
+    await this._createGroup(params.name);
+    return { id: params.name, name: params.name };
   }
 
   /** @title Send @param chat Group name or ID @param text Message text */
   async send(params: { chat: string; text: string }) {
-    const [, group] = this._resolve(params.chat);
+    const target = await this._target(params.chat);
     const msg = this._msg(params.text, 'Agent', true);
-    group.messages.push(msg);
+    target.messages.push(msg);
     return { queued: false, messageId: msg.id };
   }
 
@@ -62,64 +68,108 @@ export default class Chat extends Photon {
    * @audience user
    */
   async say(params: { chat: string; text: string; sender?: string }) {
-    const [id, group] = this._resolve(params.chat);
+    const target = await this._target(params.chat);
     const msg = this._msg(params.text, params.sender || 'User', false);
-    group.messages.push(msg);
-    this._dispatch(id, {
+    target.messages.push(msg);
+    this._fire(target, params.chat, {
       messageId: msg.id, sender: msg.sender, senderName: msg.senderName,
       content: msg.content, fromMe: false, timestamp: msg.timestamp, type: 'text',
-    }, group.name);
+    }, target.name);
     return { delivered: true, messageId: msg.id };
   }
 
   /** @title Messages @readOnly @audience user @param chat Group name or ID @param limit {@default 50} */
   async messages(params: { chat: string; limit?: number }) {
-    const [, group] = this._resolve(params.chat);
-    return group.messages.slice(-(params.limit || 50));
+    const target = await this._target(params.chat);
+    return target.messages.slice(-(params.limit || 50));
+  }
+
+  /**
+   * Subscribe to messages — routes handler to the target group's instance.
+   * @internal
+   */
+  async on(event: string, fn: (data: any) => void, filter?: any) {
+    if (filter?.group) {
+      const target = await this._target(filter.group);
+      target._eventListeners.push({ event, fn, filter });
+    } else {
+      (this as any)._eventListeners?.push({ event, fn, filter });
+    }
+  }
+
+  /** @internal */
+  async off(event: string, fn: (data: any) => void) {
+    const listeners = (this as any)._eventListeners;
+    if (!listeners) return;
+    const idx = listeners.findIndex((e: any) => e.event === event && e.fn === fn);
+    if (idx !== -1) listeners.splice(idx, 1);
   }
 
   /** @title Edit @internal */
   async edit(params: { chat: string; messageId: string; text: string }) {
-    const [, group] = this._resolve(params.chat);
-    const msg = group.messages.find(m => m.id === params.messageId);
+    const target = await this._target(params.chat);
+    const msg = target.messages.find((m: Message) => m.id === params.messageId);
     if (msg) { msg.content = params.text; msg.editedAt = new Date().toISOString(); }
   }
 
   /** @internal */ async typing() {}
   /** @internal */ async media(params: { chat: string; url: string; type: string; caption?: string }) {
-    const [, group] = this._resolve(params.chat);
+    const target = await this._target(params.chat);
     const msg = this._msg(params.caption || `[${params.type}]`, 'Agent', true);
-    group.messages.push(msg);
+    target.messages.push(msg);
     return { messageId: msg.id };
   }
 
   // ─── Private ───
 
-  private _addGroup(name: string): string {
-    const id = this._id('chat');
-    this.chatGroups[id] = { name, messages: [], createdAt: new Date().toISOString() };
-    this.emit({ type: 'group_created', name, id });
-    return id;
+  private async _createGroup(name: string): Promise<void> {
+    const inst = await (this as any).instance(name);
+    inst.name = name;
+    this.emit({ type: 'group_created', name, id: name });
   }
 
-  private _resolve(nameOrId: string): [string, typeof this.chatGroups[string]] {
-    if (this.chatGroups[nameOrId]) return [nameOrId, this.chatGroups[nameOrId]];
+  private async _target(nameOrId: string): Promise<any> {
+    // Scan persisted instances for exact or fuzzy match
+    for await (const entry of this.allInstances()) {
+      if (entry.name === 'default') continue;
+      if (entry.name === nameOrId || entry.state?.name === nameOrId) {
+        return (this as any).instance(entry.name);
+      }
+    }
+    // Fuzzy match
     const q = nameOrId.toLowerCase();
-    for (const [id, g] of Object.entries(this.chatGroups)) {
-      if (g.name.toLowerCase().includes(q)) return [id, g];
+    for await (const entry of this.allInstances()) {
+      if (entry.name === 'default') continue;
+      if (entry.state?.name?.toLowerCase().includes(q)) {
+        return (this as any).instance(entry.name);
+      }
     }
     throw new Error(`Group not found: ${nameOrId}`);
   }
 
-  private _msg(text: string, sender: string, fromMe: boolean): Message {
-    return {
-      id: this._id('msg'), sender: sender.toLowerCase().replace(/\s+/g, '_'),
-      senderName: sender, content: text, timestamp: new Date().toISOString(), fromMe, type: 'text',
-    };
+  private async _groupNames(): Promise<string[]> {
+    const names: string[] = [];
+    for await (const inst of this.allInstances()) {
+      if (inst.name !== 'default' && inst.state?.name) names.push(inst.state.name);
+    }
+    return names;
   }
 
-  private _id(prefix: string) {
-    return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  /** Dispatch to target instance's event listeners. */
+  private _fire(target: any, chatId: string, message: any, groupName?: string) {
+    if (target._dispatch) {
+      target._dispatch(chatId, message, groupName);
+    } else {
+      this._dispatch(chatId, message, groupName);
+    }
+  }
+
+  private _msg(text: string, sender: string, fromMe: boolean): Message {
+    return {
+      id: `msg_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+      sender: sender.toLowerCase().replace(/\s+/g, '_'),
+      senderName: sender, content: text, timestamp: new Date().toISOString(), fromMe, type: 'text',
+    };
   }
 }
 
