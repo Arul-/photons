@@ -6,19 +6,20 @@ import { Photon } from '@portel/photon-core';
 /**
  * Claw — orchestrates messaging ↔ Claude agent pipeline.
  *
- * Subscribe to WhatsApp and Telegram groups, route messages to an agent runner,
+ * Subscribe to WhatsApp, Telegram, and Chat groups, route messages to an agent runner,
  * and send responses back. Uses channel .on() for event-driven
  * message handling with group and trigger filtering.
  *
  * @version 4.0.0
  * @icon 🦞
- * @tags orchestrator, whatsapp, telegram, agent, claw
+ * @tags orchestrator, whatsapp, telegram, chat, agent, claw
  * @stateful
  * @noworker
  * @photon whatsapp whatsapp
  * @photon telegram telegram
  * @photon router agent-router
  * @photon courier courier
+ * @photon chat ./chat.photon.ts
  * @photon mentor ./mentor.photon.ts
  * @ui dashboard ./ui/dashboard.html
  */
@@ -47,6 +48,7 @@ export default class Claw extends Photon {
     private telegram: any,
     private router: any,
     private courier: any,
+    private chat: any,
     private mentor: any,
   ) {
     super();
@@ -240,9 +242,16 @@ export default class Claw extends Photon {
       yield { emit: 'status', message: `Telegram connected (@${tgStatus.username})` };
     }
 
+    // ── Check Chat ──
+    await this.chat.connect().catch(() => {});
+    const chatStatus = await this.chat.status().catch(() => ({ status: 'unavailable' }));
+    if (chatStatus.status === 'connected') {
+      yield { emit: 'status', message: `Chat channel connected (${chatStatus.groups} groups)` };
+    }
+
     // At least one channel must be available
-    if (waStatus.status !== 'connected' && tgStatus.status !== 'connected') {
-      return 'No channels connected. Connect WhatsApp (`photon whatsapp connect`) or Telegram (`photon telegram connect`) first.';
+    if (waStatus.status !== 'connected' && tgStatus.status !== 'connected' && chatStatus.status !== 'connected') {
+      return 'No channels connected. Connect WhatsApp, Telegram, or Chat first.';
     }
 
     yield { emit: 'status', message: 'Subscribing to groups...' };
@@ -264,6 +273,7 @@ export default class Claw extends Photon {
     const channels: string[] = [];
     if (waStatus.status === 'connected') channels.push(`WhatsApp (${waStatus.phone})`);
     if (tgStatus.status === 'connected') channels.push(`Telegram (@${tgStatus.username})`);
+    if (chatStatus.status === 'connected') channels.push(`Chat (${chatStatus.groups} groups)`);
 
     this.emit({ type: 'started', channels, groups: groupCount });
     yield { emit: 'toast', message: `Pipeline started — ${groupCount} group(s) on ${channels.join(', ')}`, type: 'success' };
@@ -304,7 +314,7 @@ export default class Claw extends Photon {
    * @param group Group or chat name (partial match) {@example "Learn CS"}
    * @param trigger Trigger word to activate the agent (empty = participant mode) {@example "@"}
    * @param folders Folder names the agent can access — first is the primary context folder {@example ["lura", "photon"]}
-   * @param channel Force a specific channel ('whatsapp'|'telegram') — auto-detected if omitted {@choice whatsapp, telegram}
+   * @param channel Force a specific channel ('whatsapp'|'telegram'|'chat') — auto-detected if omitted {@choice whatsapp, telegram, chat}
    * @param requiresTrigger Only route messages containing the trigger (default: true when trigger is non-empty)
    * @param systemPrompt System prompt prepended to every agent run for this group {@example "You are Lura, a concise personal assistant."}
    * @param agent Agent to use for this group ('claude'|'gemini'|'aider'|'opencode'|'auto') {@example "claude"}
@@ -314,7 +324,7 @@ export default class Claw extends Photon {
     group: string;
     trigger: string;
     folders: string[];
-    channel?: 'whatsapp' | 'telegram';
+    channel?: 'whatsapp' | 'telegram' | 'chat';
     requiresTrigger?: boolean;
     systemPrompt?: string;
     agent?: string;
@@ -322,10 +332,22 @@ export default class Claw extends Photon {
   }): Promise<{ name: string } & GroupConfig> {
     const query = params.group.toLowerCase();
     let matchName: string | null = null;
-    let matchChannel: 'whatsapp' | 'telegram' = 'whatsapp';
+    let matchChannel: 'whatsapp' | 'telegram' | 'chat' = 'whatsapp';
 
     // If channel is forced, only search that channel
-    if (params.channel === 'telegram') {
+    if (params.channel === 'chat') {
+      const chatGroups = await this.chat.groups().catch(() => []);
+      const match = chatGroups.find((g: any) =>
+        (g.name || '').toLowerCase().includes(query) || g.chatId === params.group
+      );
+      if (!match) {
+        throw new Error(
+          `No chat group matching "${params.group}". Create one first via the chat UI or 'photon chat create'.`
+        );
+      }
+      matchName = match.name;
+      matchChannel = 'chat';
+    } else if (params.channel === 'telegram') {
       const tgChats = await this.telegram.groups().catch(() => []);
       const match = tgChats.find((g: any) =>
         (g.name || '').toLowerCase().includes(query) || g.chatId === params.group
@@ -333,10 +355,7 @@ export default class Claw extends Photon {
       if (match) {
         matchName = match.name;
       } else if (/^-?\d+$/.test(params.group)) {
-        // Allow registering by raw numeric chat ID even if not yet discovered
-        // (Telegram bot discovers chats from incoming messages, so first registration
-        // often uses the chat ID directly before any messages are received)
-        matchName = params.group; // Use chat ID as name until discovered
+        matchName = params.group;
       } else {
         throw new Error(
           `No Telegram chat matching "${params.group}". Use the numeric chat ID, or send a message in the chat first so the bot discovers it.`
@@ -356,7 +375,7 @@ export default class Claw extends Photon {
       matchName = match.name;
       matchChannel = 'whatsapp';
     } else {
-      // Auto-detect: search WhatsApp first, then Telegram
+      // Auto-detect: search WhatsApp first, then Telegram, then Chat
       const waGroups = await this.whatsapp.groups().catch(() => []);
       const waMatch = waGroups.find((g: any) =>
         g.name.toLowerCase().includes(query) || g.jid === params.group
@@ -372,17 +391,25 @@ export default class Claw extends Photon {
         if (tgMatch) {
           matchName = tgMatch.name;
           matchChannel = 'telegram';
-        } else if (/^-?\d+$/.test(params.group)) {
-          // Numeric ID that's not in WhatsApp — assume Telegram
-          matchName = params.group;
-          matchChannel = 'telegram';
+        } else {
+          const chatGroups = await this.chat.groups().catch(() => []);
+          const chatMatch = chatGroups.find((g: any) =>
+            (g.name || '').toLowerCase().includes(query) || g.chatId === params.group
+          );
+          if (chatMatch) {
+            matchName = chatMatch.name;
+            matchChannel = 'chat';
+          } else if (/^-?\d+$/.test(params.group)) {
+            matchName = params.group;
+            matchChannel = 'telegram';
+          }
         }
       }
     }
 
     if (!matchName) {
       throw new Error(
-        `No group matching "${params.group}" on any channel. Check 'photon whatsapp groups' or 'photon telegram groups'.`
+        `No group matching "${params.group}" on any channel. Check 'photon whatsapp groups', 'photon telegram groups', or 'photon chat groups'.`
       );
     }
 
@@ -714,6 +741,17 @@ export default class Claw extends Photon {
       });
     }
 
+    const chatGroups = await this.chat.groups().catch(() => []);
+    for (const g of chatGroups) {
+      const config = this.registry[g.name];
+      results.push({
+        name: g.name,
+        channel: 'chat',
+        registered: !!config,
+        ...(config ? { folders: config.folders, trigger: config.trigger } : {}),
+      });
+    }
+
     return results;
   }
 
@@ -768,17 +806,19 @@ export default class Claw extends Photon {
       try { return await fn(); } catch { return fallback; }
     };
 
-    const [whatsapp, telegramStatus, runnerStatus, courierStatus] = await Promise.all([
+    const [whatsapp, telegramStatus, runnerStatus, courierStatus, chatStatus] = await Promise.all([
       safe(() => this.whatsapp.status(), { status: 'unknown' }),
       safe(() => this.telegram.status(), { status: 'unknown' }),
       safe(() => this.router.status(), { totalActive: 0, totalQueued: 0 }),
       safe(() => this.courier.status(), { subscriptions: 0, inboxSizes: {} }),
+      safe(() => this.chat.status(), { status: 'unknown' }),
     ]);
 
     return {
       running: this.running,
       whatsapp,
       telegram: telegramStatus,
+      chat: chatStatus,
       runner: runnerStatus,
       courier: courierStatus,
       queue: this._getQueueStatus(),
@@ -881,7 +921,9 @@ export default class Claw extends Photon {
 
   /** Get the channel photon instance for a group config */
   private _channelFor(config: GroupConfig): any {
-    return config.channel === 'telegram' ? this.telegram : this.whatsapp;
+    if (config.channel === 'telegram') return this.telegram;
+    if (config.channel === 'chat') return this.chat;
+    return this.whatsapp;
   }
 
   private _subscribeGroup(name: string, config: GroupConfig): void {
@@ -1206,10 +1248,12 @@ export default class Claw extends Photon {
     const idToName: Record<string, Map<string, string>> = {
       telegram: new Map(),
       whatsapp: new Map(),
+      chat: new Map(),
     };
     const nameToId: Record<string, Map<string, string>> = {
       telegram: new Map(),
       whatsapp: new Map(),
+      chat: new Map(),
     };
 
     const tgChats = await this.telegram.groups().catch(() => []);
@@ -1229,6 +1273,16 @@ export default class Claw extends Photon {
       if (id && name) {
         idToName.whatsapp.set(id, name);
         nameToId.whatsapp.set(name.toLowerCase(), id);
+      }
+    }
+
+    const chatGroups = await this.chat.groups().catch(() => []);
+    for (const g of chatGroups) {
+      const id = g.chatId || '';
+      const name = g.name || '';
+      if (id && name) {
+        idToName.chat.set(id, name);
+        nameToId.chat.set(name.toLowerCase(), id);
       }
     }
 
@@ -2236,7 +2290,7 @@ interface GroupConfig {
   /** Agent to use: 'claude' | 'gemini' | 'aider' | 'opencode' | 'auto' */
   agent: string;
   /** Channel this group belongs to: 'whatsapp' | 'telegram' */
-  channel: 'whatsapp' | 'telegram';
+  channel: 'whatsapp' | 'telegram' | 'chat';
   /** Delivery schedule via courier (e.g. '@30m', '@hourly'). Omit for real-time. */
   schedule?: string;
 }
