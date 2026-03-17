@@ -379,6 +379,83 @@
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
 
+    /* ── Persona Editor ── */
+    .persona-editor {
+      width: 100%; min-height: 200px; padding: 10px; border-radius: 6px;
+      border: 1px solid var(--border-color); background: var(--bg-tertiary);
+      color: var(--text-primary); font-family: inherit; font-size: 13px;
+      line-height: 1.6; resize: vertical; outline: none;
+    }
+    .persona-editor:focus { border-color: var(--blue); }
+
+    /* ── Journal Entries ── */
+    .journal-entry {
+      padding: 10px; border-radius: 6px; margin-bottom: 8px;
+      background: var(--bg-card); border: 1px solid var(--border-color);
+      font-size: 12px;
+    }
+    .journal-entry .je-thought {
+      color: var(--text-primary); line-height: 1.5; font-style: italic;
+    }
+    .journal-entry .je-meta {
+      color: var(--text-muted); font-size: 10px; margin-top: 4px;
+      display: flex; gap: 8px;
+    }
+    .journal-empty { color: var(--text-muted); font-size: 12px; font-style: italic; }
+
+    /* ── Skills List ── */
+    .skill-item {
+      display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+      background: var(--bg-card); border: 1px solid var(--border-color);
+      border-radius: 6px; margin-bottom: 6px; font-size: 12px;
+    }
+    .skill-item .skill-name { font-weight: 600; }
+    .skill-item .skill-desc { flex: 1; color: var(--text-secondary); }
+    .skill-item .skill-photon {
+      font-family: monospace; font-size: 10px; background: var(--purple-dim);
+      color: var(--purple); padding: 1px 6px; border-radius: 3px;
+    }
+    .skill-item .skill-source {
+      font-size: 10px; padding: 1px 5px; border-radius: 3px;
+    }
+    .skill-item .skill-source.local { background: var(--green-dim); color: var(--green); }
+    .skill-item .skill-source.marketplace { background: var(--blue-dim); color: var(--blue); }
+
+    /* ── Proposals ── */
+    .proposal-card {
+      background: var(--bg-card); border: 1px solid var(--border-color);
+      border-radius: 8px; padding: 12px; margin-bottom: 10px;
+    }
+    .proposal-card .pc-header {
+      display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;
+    }
+    .proposal-card .pc-name { font-weight: 600; font-size: 13px; }
+    .proposal-card .pc-type {
+      font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 600;
+    }
+    .proposal-card .pc-type.persona { background: var(--purple-dim); color: var(--purple); }
+    .proposal-card .pc-type.skill { background: var(--blue-dim); color: var(--blue); }
+    .proposal-card .pc-type.memory { background: var(--green-dim); color: var(--green); }
+    .proposal-card .pc-reason {
+      font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; line-height: 1.4;
+    }
+    .proposal-card .pc-change {
+      font-size: 12px; background: var(--bg-tertiary); padding: 8px;
+      border-radius: 4px; font-family: monospace; white-space: pre-wrap; margin-bottom: 8px;
+    }
+    .proposal-card .pc-actions { display: flex; gap: 6px; }
+
+    /* ── History (git log) ── */
+    .history-entry {
+      display: flex; gap: 8px; padding: 6px 0;
+      border-bottom: 1px solid var(--border-color); font-size: 12px;
+    }
+    .history-entry .he-hash {
+      font-family: monospace; color: var(--purple); font-size: 11px; flex-shrink: 0;
+    }
+    .history-entry .he-msg { flex: 1; }
+    .history-entry .he-date { color: var(--text-muted); font-size: 11px; flex-shrink: 0; }
+
     /* ── Aggregate summary (no group selected) ── */
     .agg-summary { padding: 24px; }
     .agg-summary h2 { font-size: 18px; font-weight: 600; margin-bottom: 16px; }
@@ -578,6 +655,7 @@
       <div class="detail-header">
         <h2 id="detailGroupName">Group</h2>
         <div class="detail-actions">
+          <button class="btn btn-sm" id="mentorReviewBtn" title="Run mentor review">Mentor Review</button>
           <button class="btn btn-sm btn-danger btn-ghost" id="unregisterBtn">Unregister</button>
         </div>
       </div>
@@ -585,8 +663,11 @@
       <div class="tab-bar">
         <div class="tab active" data-tab="overview">Overview</div>
         <div class="tab" data-tab="config">Config</div>
+        <div class="tab" data-tab="persona">Persona</div>
+        <div class="tab" data-tab="skills">Skills <span class="tab-count" id="skillCount">0</span></div>
+        <div class="tab" data-tab="journal">Journal</div>
         <div class="tab" data-tab="tasks">Tasks <span class="tab-count" id="taskCount">0</span></div>
-        <div class="tab" data-tab="memory">Memory</div>
+        <div class="tab" data-tab="memory">Memory <span class="tab-count" id="proposalCount" style="display:none;background:var(--orange-dim);color:var(--orange)">0</span></div>
       </div>
 
       <!-- Tab: Overview -->
@@ -716,6 +797,57 @@
           </div>
         </div>
 
+        <!-- Tab: Persona -->
+        <div class="tab-pane" id="pane-persona">
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">
+            The agent's living persona. Evolves over time through mentor reviews.
+          </p>
+          <textarea class="persona-editor" id="personaEditor" placeholder="Loading persona..."></textarea>
+          <div class="form-actions">
+            <button class="btn btn-sm" id="personaReloadBtn">Reload</button>
+            <button class="btn btn-sm btn-primary" id="personaSaveBtn">Save Persona</button>
+          </div>
+        </div>
+
+        <!-- Tab: Skills -->
+        <div class="tab-pane" id="pane-skills">
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">
+            Skills available to this agent. Local skills auto-apply; marketplace skills need approval.
+          </p>
+          <div id="skillsList"></div>
+          <div class="inline-panel" style="margin-top:12px;">
+            <h3>Add Skill</h3>
+            <div class="form-row">
+              <label>Skill Name</label>
+              <input type="text" class="form-input" id="newSkillName" placeholder="e.g. web-search">
+            </div>
+            <div class="form-row">
+              <label>Description</label>
+              <input type="text" class="form-input" id="newSkillDesc" placeholder="What this skill does...">
+            </div>
+            <div class="form-row">
+              <label>Photon <span style="font-weight:normal;text-transform:none">(optional)</span></label>
+              <input type="text" class="form-input" id="newSkillPhoton" placeholder="photon name backing this skill">
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-sm btn-primary" id="addSkillBtn">Add Skill</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab: Journal -->
+        <div class="tab-pane" id="pane-journal">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+            <p style="font-size:12px;color:var(--text-muted);">
+              The agent's inner monologue — thoughts recorded before each response.
+            </p>
+            <button class="btn btn-sm" id="journalRefreshBtn">Refresh</button>
+          </div>
+          <div id="journalEntries">
+            <p class="journal-empty">Loading journal entries...</p>
+          </div>
+        </div>
+
         <!-- Tab: Memory -->
         <div class="tab-pane" id="pane-memory">
           <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
@@ -729,6 +861,28 @@
           <div id="compactResult" style="display:none;" class="inline-panel">
             <h3>Compaction Result</h3>
             <div id="compactDetails" style="font-size:12px;"></div>
+          </div>
+
+          <!-- Proposals Section -->
+          <div class="inline-panel" style="margin-top:16px;">
+            <h3>Pending Proposals</h3>
+            <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">
+              Changes proposed by the mentor. Approve to apply, reject to discard.
+            </p>
+            <div id="proposalsList">
+              <p class="journal-empty">No pending proposals</p>
+            </div>
+          </div>
+
+          <!-- Evolution History -->
+          <div class="inline-panel" style="margin-top:12px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+              <h3>Evolution History</h3>
+              <button class="btn btn-sm btn-ghost" id="historyRefreshBtn">Refresh</button>
+            </div>
+            <div id="historyList">
+              <p class="journal-empty">Loading...</p>
+            </div>
           </div>
         </div>
       </div>
@@ -824,7 +978,7 @@
 
   document.querySelector('.tab-bar').addEventListener('click', e => {
     const tab = e.target.closest('.tab');
-    if (tab) switchTab(tab.dataset.tab);
+    if (tab) { switchTab(tab.dataset.tab); onTabSwitch(tab.dataset.tab); }
   });
 
   // ─── Render ───
@@ -1267,6 +1421,245 @@
     } catch (e) { toast('Inject failed: ' + (e.message || e), 'error'); }
   }
 
+  // ─── Persona ───
+
+  async function loadPersona() {
+    if (!state.selectedGroup) return;
+    try {
+      const raw = await window.photon.callTool('persona', { group: state.selectedGroup });
+      const result = parseMCP(raw);
+      $('personaEditor').value = result.persona || '';
+    } catch (e) { $('personaEditor').value = '(Failed to load persona)'; }
+  }
+
+  async function savePersona() {
+    if (!state.selectedGroup) return;
+    $('personaSaveBtn').disabled = true;
+    $('personaSaveBtn').textContent = 'Saving...';
+    try {
+      await window.photon.callTool('persona', { group: state.selectedGroup, content: $('personaEditor').value });
+      toast('Persona saved', 'success');
+      addActivity('outgoing', state.selectedGroup, 'Persona updated');
+    } catch (e) { toast('Save failed: ' + (e.message || e), 'error'); }
+    $('personaSaveBtn').disabled = false;
+    $('personaSaveBtn').textContent = 'Save Persona';
+  }
+
+  // ─── Skills ───
+
+  async function loadSkills() {
+    if (!state.selectedGroup) return;
+    try {
+      const raw = await window.photon.callTool('skills', { group: state.selectedGroup, action: 'list' });
+      const skills = parseMCP(raw) || [];
+      $('skillCount').textContent = skills.length;
+      renderSkills(skills);
+    } catch (e) {
+      $('skillsList').innerHTML = '<p class="journal-empty">Failed to load skills</p>';
+    }
+  }
+
+  function renderSkills(skills) {
+    if (skills.length === 0) {
+      $('skillsList').innerHTML = '<p class="journal-empty">No skills configured. Add one below.</p>';
+      return;
+    }
+    $('skillsList').innerHTML = skills.map(s =>
+      '<div class="skill-item">' +
+        '<span class="skill-name">' + esc(s.name) + '</span>' +
+        '<span class="skill-desc">' + esc(s.description || '') + '</span>' +
+        (s.photon ? '<span class="skill-photon">' + esc(s.photon) + '</span>' : '') +
+        '<span class="skill-source ' + (s.source || 'local') + '">' + (s.source || 'local') + '</span>' +
+        '<button class="btn btn-sm btn-danger btn-ghost skill-remove" data-name="' + esc(s.name) + '">&times;</button>' +
+      '</div>'
+    ).join('');
+    $('skillsList').querySelectorAll('.skill-remove').forEach(el => {
+      el.addEventListener('click', () => removeSkill(el.dataset.name));
+    });
+  }
+
+  async function addSkill() {
+    if (!state.selectedGroup) return;
+    const name = $('newSkillName').value.trim();
+    if (!name) { toast('Skill name required', 'error'); return; }
+    const params = {
+      group: state.selectedGroup, action: 'add', skill: name,
+      description: $('newSkillDesc').value.trim() || name,
+    };
+    const photon = $('newSkillPhoton').value.trim();
+    if (photon) params.photon = photon;
+    try {
+      await window.photon.callTool('skills', params);
+      $('newSkillName').value = '';
+      $('newSkillDesc').value = '';
+      $('newSkillPhoton').value = '';
+      toast('Skill added: ' + name, 'success');
+      addActivity('outgoing', state.selectedGroup, 'Skill added: ' + name);
+      loadSkills();
+    } catch (e) { toast('Add failed: ' + (e.message || e), 'error'); }
+  }
+
+  async function removeSkill(name) {
+    if (!state.selectedGroup) return;
+    try {
+      await window.photon.callTool('skills', { group: state.selectedGroup, action: 'remove', skill: name });
+      toast('Skill removed: ' + name, 'success');
+      loadSkills();
+    } catch (e) { toast('Remove failed: ' + (e.message || e), 'error'); }
+  }
+
+  // ─── Journal ───
+
+  async function loadJournal() {
+    if (!state.selectedGroup) return;
+    try {
+      const raw = await window.photon.callTool('journal', { group: state.selectedGroup, days: 7 });
+      const entries = parseMCP(raw) || [];
+      renderJournal(entries);
+    } catch (e) {
+      $('journalEntries').innerHTML = '<p class="journal-empty">Failed to load journal</p>';
+    }
+  }
+
+  function renderJournal(entries) {
+    if (entries.length === 0) {
+      $('journalEntries').innerHTML = '<p class="journal-empty">No journal entries in the last 7 days. The agent records thoughts when responding to messages.</p>';
+      return;
+    }
+    // Show newest first, limit to 50
+    const shown = entries.slice(-50).reverse();
+    $('journalEntries').innerHTML = shown.map(e =>
+      '<div class="journal-entry">' +
+        '<div class="je-thought">' + esc(e.thought || '') + '</div>' +
+        '<div class="je-meta">' +
+          '<span>Re: ' + esc((e.userMessage || '').substring(0, 60)) + '</span>' +
+          '<span>' + esc(e.sender || '') + '</span>' +
+          '<span>' + (e.timestamp ? timeAgo(e.timestamp) : '') + '</span>' +
+        '</div>' +
+      '</div>'
+    ).join('');
+  }
+
+  // ─── Proposals ───
+
+  async function loadProposals() {
+    if (!state.selectedGroup) return;
+    try {
+      const raw = await window.photon.callTool('proposals', { group: state.selectedGroup });
+      const proposals = parseMCP(raw) || [];
+      const count = proposals.length;
+      $('proposalCount').textContent = count;
+      $('proposalCount').style.display = count > 0 ? '' : 'none';
+      renderProposals(proposals);
+    } catch (e) {
+      $('proposalsList').innerHTML = '<p class="journal-empty">Failed to load proposals</p>';
+    }
+  }
+
+  function renderProposals(proposals) {
+    if (proposals.length === 0) {
+      $('proposalsList').innerHTML = '<p class="journal-empty">No pending proposals</p>';
+      return;
+    }
+    $('proposalsList').innerHTML = proposals.map(p =>
+      '<div class="proposal-card">' +
+        '<div class="pc-header">' +
+          '<span class="pc-name">' + esc(p.name || '') + '</span>' +
+          '<span class="pc-type ' + (p.type || 'persona') + '">' + esc(p.type || 'persona') + '</span>' +
+        '</div>' +
+        (p.reason ? '<div class="pc-reason">' + esc(p.reason) + '</div>' : '') +
+        (p.change ? '<div class="pc-change">' + esc(p.change) + '</div>' : '') +
+        '<div class="pc-actions">' +
+          '<button class="btn btn-sm btn-start proposal-approve" data-name="' + esc(p.name) + '">Approve</button>' +
+          '<button class="btn btn-sm btn-danger btn-ghost proposal-reject" data-name="' + esc(p.name) + '">Reject</button>' +
+        '</div>' +
+      '</div>'
+    ).join('');
+    $('proposalsList').querySelectorAll('.proposal-approve').forEach(el => {
+      el.addEventListener('click', () => approveProposal(el.dataset.name));
+    });
+    $('proposalsList').querySelectorAll('.proposal-reject').forEach(el => {
+      el.addEventListener('click', () => rejectProposal(el.dataset.name));
+    });
+  }
+
+  async function approveProposal(name) {
+    if (!state.selectedGroup) return;
+    try {
+      await window.photon.callTool('approve', { group: state.selectedGroup, proposal: name });
+      toast('Proposal approved: ' + name, 'success');
+      addActivity('outgoing', state.selectedGroup, 'Approved: ' + name);
+      loadProposals();
+      loadPersona();
+      loadHistory();
+    } catch (e) { toast('Approve failed: ' + (e.message || e), 'error'); }
+  }
+
+  async function rejectProposal(name) {
+    if (!state.selectedGroup) return;
+    try {
+      await window.photon.callTool('reject', { group: state.selectedGroup, proposal: name });
+      toast('Proposal rejected: ' + name, 'success');
+      loadProposals();
+      loadHistory();
+    } catch (e) { toast('Reject failed: ' + (e.message || e), 'error'); }
+  }
+
+  // ─── Mentor Review ───
+
+  async function runMentorReview() {
+    if (!state.selectedGroup) return;
+    $('mentorReviewBtn').disabled = true;
+    $('mentorReviewBtn').textContent = 'Reviewing...';
+    try {
+      const raw = await window.photon.callTool('review', { group: state.selectedGroup });
+      const result = parseMCP(raw);
+      toast('Mentor review complete: ' + (result.proposalsCreated || 0) + ' proposal(s)', 'success');
+      addActivity('outgoing', state.selectedGroup, 'Mentor review: ' + (result.journalEntries || 0) + ' entries analyzed, ' + (result.proposalsCreated || 0) + ' proposals');
+      loadProposals();
+      loadPersona();
+      loadHistory();
+    } catch (e) { toast('Review failed: ' + (e.message || e), 'error'); }
+    $('mentorReviewBtn').disabled = false;
+    $('mentorReviewBtn').textContent = 'Mentor Review';
+  }
+
+  // ─── History ───
+
+  async function loadHistory() {
+    if (!state.selectedGroup) return;
+    try {
+      const raw = await window.photon.callTool('history', { group: state.selectedGroup, count: 20 });
+      const entries = parseMCP(raw) || [];
+      renderHistory(entries);
+    } catch (e) {
+      $('historyList').innerHTML = '<p class="journal-empty">No evolution history</p>';
+    }
+  }
+
+  function renderHistory(entries) {
+    if (entries.length === 0) {
+      $('historyList').innerHTML = '<p class="journal-empty">No evolution history yet</p>';
+      return;
+    }
+    $('historyList').innerHTML = entries.map(e =>
+      '<div class="history-entry">' +
+        '<span class="he-hash">' + esc((e.hash || '').substring(0, 7)) + '</span>' +
+        '<span class="he-msg">' + esc(e.message || '') + '</span>' +
+        '<span class="he-date">' + (e.date ? timeAgo(e.date) : '') + '</span>' +
+      '</div>'
+    ).join('');
+  }
+
+  // ─── Tab data loading ───
+
+  function onTabSwitch(tabName) {
+    if (tabName === 'persona') loadPersona();
+    if (tabName === 'skills') loadSkills();
+    if (tabName === 'journal') loadJournal();
+    if (tabName === 'memory') { loadProposals(); loadHistory(); }
+  }
+
   // ─── Register ───
 
   function showRegisterPanel() {
@@ -1424,6 +1817,12 @@
   $('createTaskBtn').addEventListener('click', createTask);
   $('injectBtn').addEventListener('click', injectMessage);
   $('injectMsg').addEventListener('keydown', e => { if (e.key === 'Enter') injectMessage(); });
+  $('mentorReviewBtn').addEventListener('click', runMentorReview);
+  $('personaSaveBtn').addEventListener('click', savePersona);
+  $('personaReloadBtn').addEventListener('click', loadPersona);
+  $('addSkillBtn').addEventListener('click', addSkill);
+  $('journalRefreshBtn').addEventListener('click', loadJournal);
+  $('historyRefreshBtn').addEventListener('click', loadHistory);
 
   // Deselect group when clicking aggregate view buttons
   $('aggView').addEventListener('click', e => {

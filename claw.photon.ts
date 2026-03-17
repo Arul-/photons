@@ -2082,6 +2082,123 @@ Respond in EXACTLY this format (include all three sections even if empty):
     throw new Error(`Unknown action: ${action}`);
   }
 
+  // ─── Mentor Proxy Methods (for dashboard UI) ───────────────────
+
+  /**
+   * View or edit the agent's persona.
+   *
+   * @title Agent Persona
+   * @internal
+   * @param group Group name (partial match)
+   * @param content New persona content (omit to view)
+   */
+  async persona(params: { group: string; content?: string }): Promise<{ persona: string; path: string }> {
+    const query = params.group.toLowerCase();
+    const name = Object.keys(this.registry).find(k => k.toLowerCase().includes(query));
+    if (!name) throw new Error(`No registered group matching "${params.group}"`);
+
+    const personaPath = path.join(this._agentDir(name), 'persona.md');
+    if (params.content !== undefined) {
+      await this.mentor.setPersona({ agent: name, content: params.content });
+    }
+    const persona = await fs.promises.readFile(personaPath, 'utf-8').catch(() => '');
+    return { persona, path: personaPath };
+  }
+
+  /**
+   * Read recent journal entries for a group's agent.
+   *
+   * @title Agent Journal
+   * @internal
+   * @param group Group name (partial match)
+   * @param days Number of days to look back (default 7)
+   */
+  async journal(params: { group: string; days?: number }): Promise<any[]> {
+    const query = params.group.toLowerCase();
+    const name = Object.keys(this.registry).find(k => k.toLowerCase().includes(query));
+    if (!name) throw new Error(`No registered group matching "${params.group}"`);
+
+    return this.mentor.journal({ agent: name, days: params.days });
+  }
+
+  /**
+   * List pending proposals for a group's agent.
+   *
+   * @title Agent Proposals
+   * @internal
+   * @param group Group name (partial match)
+   */
+  async proposals(params: { group: string }): Promise<any[]> {
+    const query = params.group.toLowerCase();
+    const name = Object.keys(this.registry).find(k => k.toLowerCase().includes(query));
+    if (!name) throw new Error(`No registered group matching "${params.group}"`);
+
+    return this.mentor.proposals({ agent: name });
+  }
+
+  /**
+   * Approve a pending proposal.
+   *
+   * @title Approve Proposal
+   * @internal
+   * @param group Group name (partial match)
+   * @param proposal Proposal name to approve
+   */
+  async approve(params: { group: string; proposal: string }): Promise<any> {
+    const query = params.group.toLowerCase();
+    const name = Object.keys(this.registry).find(k => k.toLowerCase().includes(query));
+    if (!name) throw new Error(`No registered group matching "${params.group}"`);
+
+    return this.mentor.approve({ agent: name, proposal: params.proposal });
+  }
+
+  /**
+   * Reject a pending proposal.
+   *
+   * @title Reject Proposal
+   * @internal
+   * @param group Group name (partial match)
+   * @param proposal Proposal name to reject
+   */
+  async reject(params: { group: string; proposal: string }): Promise<any> {
+    const query = params.group.toLowerCase();
+    const name = Object.keys(this.registry).find(k => k.toLowerCase().includes(query));
+    if (!name) throw new Error(`No registered group matching "${params.group}"`);
+
+    return this.mentor.reject({ agent: name, proposal: params.proposal });
+  }
+
+  /**
+   * Trigger a manual mentor review for a group's agent.
+   *
+   * @title Mentor Review
+   * @internal
+   * @param group Group name (partial match)
+   */
+  async review(params: { group: string }): Promise<any> {
+    const query = params.group.toLowerCase();
+    const name = Object.keys(this.registry).find(k => k.toLowerCase().includes(query));
+    if (!name) throw new Error(`No registered group matching "${params.group}"`);
+
+    return this.mentor.review({ agent: name });
+  }
+
+  /**
+   * View the agent's evolution history (git log).
+   *
+   * @title Evolution History
+   * @internal
+   * @param group Group name (partial match)
+   * @param count Number of commits to show (default 20)
+   */
+  async history(params: { group: string; count?: number }): Promise<any[]> {
+    const query = params.group.toLowerCase();
+    const name = Object.keys(this.registry).find(k => k.toLowerCase().includes(query));
+    if (!name) throw new Error(`No registered group matching "${params.group}"`);
+
+    return this.mentor.history({ agent: name, count: params.count });
+  }
+
   /** Schedule memory compaction for all memory-enabled groups */
   private async _scheduleCompaction(): Promise<void> {
     const taskName = 'memory-compact-all';
