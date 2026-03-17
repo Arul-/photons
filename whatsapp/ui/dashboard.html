@@ -527,7 +527,6 @@
     ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 </head>
 <body>
   <!-- Header -->
@@ -944,18 +943,7 @@
       $('emptyState').style.display = 'none';
       $('groupPanel').style.display = 'none';
       $('qrState').style.display = 'flex';
-      const container = $('qrCode');
-      container.innerHTML = '';
-      try {
-        const qr = qrcode(0, 'L');
-        qr.addData(qrData);
-        qr.make();
-        container.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 4 });
-      } catch {
-        // Fallback: show raw text if QR generation fails
-        container.innerHTML = '<div style="font-family:monospace;word-break:break-all;background:#fff;color:#000;padding:16px;border-radius:8px;font-size:11px;max-width:300px;margin:0 auto;">' +
-          qrData + '</div>';
-      }
+      window.photon.renderQR($('qrCode'), qrData, { size: 300, errorCorrection: 'L' });
     }
 
     // ── Actions ──
