@@ -65,15 +65,28 @@ export default class Chat extends Photon {
    * @param chat Group name or ID
    * @param text Message text
    * @param sender Sender name {@default "User"}
+   * @param images Up to 3 image file paths {@max 3}
    * @audience user
    */
-  async say(params: { chat: string; text: string; sender?: string }) {
+  async say(params: { chat: string; text: string; sender?: string; images?: string[] }) {
     const target = await this._target(params.chat);
-    const msg = this._msg(params.text, params.sender || 'User', false);
+    const images = (params.images || []).slice(0, 3);
+    const hasImages = images.length > 0;
+    const msg = this._msg(
+      params.text || (hasImages ? '[Photo]' : ''),
+      params.sender || 'User', false,
+      hasImages ? 'image' : 'text',
+      hasImages ? { mimetype: 'image/jpeg', caption: params.text } : undefined,
+      images,
+    );
     target.messages.push(msg);
     this._fire(target, params.chat, {
       messageId: msg.id, sender: msg.sender, senderName: msg.senderName,
-      content: msg.content, fromMe: false, timestamp: msg.timestamp, type: 'text',
+      content: msg.content, fromMe: false, timestamp: msg.timestamp,
+      type: msg.type,
+      ...(msg.filePath ? { filePath: msg.filePath } : {}),
+      ...(msg.media ? { media: msg.media } : {}),
+      ...(msg.images ? { images: msg.images } : {}),
     }, target.name);
     return { delivered: true, messageId: msg.id };
   }
@@ -164,11 +177,16 @@ export default class Chat extends Photon {
     }
   }
 
-  private _msg(text: string, sender: string, fromMe: boolean): Message {
+  private _msg(
+    text: string, sender: string, fromMe: boolean,
+    type: string = 'text', media?: Message['media'], images?: string[],
+  ): Message {
     return {
       id: `msg_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
       sender: sender.toLowerCase().replace(/\s+/g, '_'),
-      senderName: sender, content: text, timestamp: new Date().toISOString(), fromMe, type: 'text',
+      senderName: sender, content: text, timestamp: new Date().toISOString(), fromMe, type,
+      ...(media ? { media } : {}),
+      ...(images?.length ? { filePath: images[0], images } : {}),
     };
   }
 }
@@ -177,4 +195,5 @@ interface Message {
   id: string; sender: string; senderName: string; content: string;
   timestamp: string; fromMe: boolean; type: string;
   media?: { mimetype?: string; caption?: string }; editedAt?: string;
+  filePath?: string; images?: string[];
 }

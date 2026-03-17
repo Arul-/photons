@@ -72,6 +72,14 @@ export default class Telegram extends Photon {
     return path.join(this.authDir, 'offset.json');
   }
 
+  private get mediaDir(): string {
+    const dir = this._photonFilePath
+      ? this.storage('media')
+      : path.join(os.homedir(), '.photon', 'data', 'telegram', 'media');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
 
   // ─── Lifecycle Hooks ──────────────────────────────────────────
 
@@ -575,7 +583,7 @@ export default class Telegram extends Photon {
 
       for (const update of updates) {
         if (this._processedIds.has(update.update_id)) continue;
-        this._handleUpdate(update);
+        await this._handleUpdate(update);
         this._processedIds.add(update.update_id);
         if (update.update_id >= this._offset) {
           this._offset = update.update_id + 1;
@@ -657,7 +665,7 @@ export default class Telegram extends Photon {
           // Dedup: skip updates we already processed before a restart
           if (this._processedIds.has(update.update_id)) continue;
 
-          this._handleUpdate(update);
+          await this._handleUpdate(update);
 
           // Track processed ID for dedup
           this._processedIds.add(update.update_id);
@@ -714,7 +722,7 @@ export default class Telegram extends Photon {
   }
 
   /** Process a single Telegram update */
-  private _handleUpdate(update: any): void {
+  private async _handleUpdate(update: any): Promise<void> {
     const raw = update.message || update.channel_post || update.edited_message;
     if (!raw) return;
 
@@ -746,6 +754,15 @@ export default class Telegram extends Photon {
     const from = raw.from || {};
     const fromMe = from.id === this._botId;
     const message = this._extractMessage(raw, chatId, fromMe);
+
+    // Download media — await so filePath is set before dispatch to claw
+    if (message.media && ['photo', 'video', 'audio', 'document', 'sticker'].includes(message.type)) {
+      try {
+        await this._downloadMedia(raw, message);
+      } catch (err: any) {
+        this.emit({ type: 'error', source: 'media_download', error: err.message });
+      }
+    }
 
     // Buffer for pending()
     if (this._pendingMessages.length < 1000) {
@@ -834,6 +851,58 @@ export default class Telegram extends Photon {
       ...(location ? { location } : {}),
       ...(quotedMessage ? { quotedMessage } : {}),
     };
+  }
+
+  /** Download media file from Telegram and attach filePath to the message. */
+  private async _downloadMedia(raw: any, inbound: InboundMessage): Promise<void> {
+    // Extract file_id from the raw message — pick largest photo, or direct field
+    let fileId: string | undefined;
+    if (raw.photo && Array.isArray(raw.photo) && raw.photo.length > 0) {
+      fileId = raw.photo[raw.photo.length - 1].file_id; // largest size
+    } else if (raw.video?.file_id) {
+      fileId = raw.video.file_id;
+    } else if (raw.audio?.file_id) {
+      fileId = raw.audio.file_id;
+    } else if (raw.voice?.file_id) {
+      fileId = raw.voice.file_id;
+    } else if (raw.document?.file_id) {
+      fileId = raw.document.file_id;
+    } else if (raw.sticker?.file_id) {
+      fileId = raw.sticker.file_id;
+    }
+    if (!fileId) return;
+
+    const ext = this._mimeToExt(inbound.media?.mimetype || '');
+    const localPath = path.join(this.mediaDir, `${inbound.messageId}${ext}`);
+
+    // Skip if already downloaded
+    if (fs.existsSync(localPath)) {
+      inbound.filePath = localPath;
+      return;
+    }
+
+    // Get file path from Telegram API
+    const fileInfo = await this._api('getFile', { file_id: fileId });
+    if (!fileInfo?.file_path) return;
+
+    // Download the file
+    const url = `https://api.telegram.org/file/bot${this._token}/${fileInfo.file_path}`;
+    const response = await fetch(url);
+    if (!response.ok) return;
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    await fs.promises.writeFile(localPath, buffer);
+    inbound.filePath = localPath;
+  }
+
+  /** Map MIME types to file extensions */
+  private _mimeToExt(mime: string): string {
+    const map: Record<string, string> = {
+      'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif',
+      'video/mp4': '.mp4', 'audio/ogg': '.ogg', 'audio/mpeg': '.mp3', 'audio/mp4': '.m4a',
+      'application/pdf': '.pdf',
+    };
+    return map[mime] || `.${mime.split('/')[1] || 'bin'}`;
   }
 
   /** Dispatch message to registered .on() listeners with filter matching */
@@ -946,6 +1015,7 @@ interface InboundMessage {
   fromMe: boolean;
   type: 'text' | 'photo' | 'video' | 'audio' | 'document' | 'sticker' | 'location' | 'contact' | 'poll' | 'unknown';
   media?: { mimetype?: string; caption?: string; filename?: string; seconds?: number };
+  filePath?: string;
   location?: { lat: number; lng: number; name?: string };
   quotedMessage?: { id: string; content: string; sender: string };
 }

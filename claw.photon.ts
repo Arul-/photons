@@ -1368,7 +1368,7 @@ export default class Claw extends Photon {
     chatId?: string;
     message: {
       sender: string; senderName: string; content: string; fromMe: boolean; timestamp: string;
-      type?: string; filePath?: string; media?: { mimetype?: string; caption?: string };
+      type?: string; filePath?: string; images?: string[]; media?: { mimetype?: string; caption?: string };
     };
   }): Promise<void> {
     const msg = event.message;
@@ -1421,11 +1421,12 @@ export default class Claw extends Photon {
       ch.typing({ chat: name, typing: true }).catch(() => {});
     }, config.channel === 'telegram' ? 4_000 : 20_000); // Telegram typing expires after ~5s
 
-    // Collect addDirs: extra config folders + media dir from attachment
+    // Collect addDirs: extra config folders + media dir from attachments
     const addDirs: string[] = config.folders.slice(1);
-    if (msg.filePath) {
-      const mediaDir = msg.filePath.substring(0, msg.filePath.lastIndexOf('/'));
-      if (!addDirs.includes(mediaDir)) addDirs.push(mediaDir);
+    const mediaPaths = msg.images?.length ? msg.images : msg.filePath ? [msg.filePath] : [];
+    for (const p of mediaPaths) {
+      const mediaDir = p.substring(0, p.lastIndexOf('/'));
+      if (mediaDir && !addDirs.includes(mediaDir)) addDirs.push(mediaDir);
     }
 
     const sessionKey = `${config.agent}:${primaryFolder}`;
@@ -1559,7 +1560,8 @@ export default class Claw extends Photon {
   }
 
   private _formatContext(messages: MessageEntry[], currentMsg?: {
-    type?: string; filePath?: string; media?: { mimetype?: string; caption?: string };
+    type?: string; filePath?: string; images?: string[];
+    media?: { mimetype?: string; caption?: string };
   }): string {
     const lines = messages.map(m =>
       `<message sender="${this._esc(m.sender)}" time="${m.timestamp}">${this._esc(m.content)}</message>`
@@ -1567,12 +1569,21 @@ export default class Claw extends Photon {
 
     let context = `<messages>\n${lines.join('\n')}\n</messages>`;
 
-    // Append media context for the current message if it has a file
-    if (currentMsg?.filePath && currentMsg?.type && currentMsg.type !== 'text') {
-      context += `\n\n<attached-media type="${currentMsg.type}" path="${this._esc(currentMsg.filePath)}"`;
-      if (currentMsg.media?.mimetype) context += ` mimetype="${this._esc(currentMsg.media.mimetype)}"`;
-      if (currentMsg.media?.caption) context += ` caption="${this._esc(currentMsg.media.caption)}"`;
-      context += ` />\n<instruction>The user sent a ${currentMsg.type} file. You can read it at the path above using the Read tool. If it's an image, you can view it directly. Respond to the media content.</instruction>`;
+    // Append media context for the current message if it has files
+    if (currentMsg?.type && currentMsg.type !== 'text') {
+      const paths = currentMsg.images?.length
+        ? currentMsg.images
+        : currentMsg.filePath ? [currentMsg.filePath] : [];
+
+      for (const p of paths) {
+        context += `\n\n<attached-media type="${currentMsg.type}" path="${this._esc(p)}"`;
+        if (currentMsg.media?.mimetype) context += ` mimetype="${this._esc(currentMsg.media.mimetype)}"`;
+        context += ` />`;
+      }
+      if (paths.length > 0) {
+        const noun = paths.length === 1 ? `a ${currentMsg.type} file` : `${paths.length} ${currentMsg.type} files`;
+        context += `\n<instruction>The user sent ${noun}. You can read ${paths.length === 1 ? 'it' : 'them'} at the paths above using the Read tool. If ${paths.length === 1 ? "it's an image" : "they're images"}, you can view ${paths.length === 1 ? 'it' : 'them'} directly. Respond to the media content.</instruction>`;
+      }
     }
 
     return context;

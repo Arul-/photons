@@ -1267,11 +1267,13 @@ export default class WhatsApp extends Photon {
           messageId, chatJid, sender, senderName, timestamp, fromMe,
         });
 
-        // Download media for supported types (non-blocking — attach path when ready)
+        // Download media for supported types — await so filePath is set before dispatch
         if (inbound.media && ['image', 'video', 'audio', 'document', 'sticker'].includes(inbound.type)) {
-          this._downloadMedia(msg, inbound).catch((err: any) => {
+          try {
+            await this._downloadMedia(msg, inbound);
+          } catch (err: any) {
             this.emit({ type: 'error', source: 'media_download', error: err.message });
-          });
+          }
         }
 
         // Buffer for polling via pending()
