@@ -1581,8 +1581,14 @@ export default class Claw extends Photon {
         context += ` />`;
       }
       if (paths.length > 0) {
-        const noun = paths.length === 1 ? `a ${currentMsg.type} file` : `${paths.length} ${currentMsg.type} files`;
-        context += `\n<instruction>The user sent ${noun}. You can read ${paths.length === 1 ? 'it' : 'them'} at the paths above using the Read tool. If ${paths.length === 1 ? "it's an image" : "they're images"}, you can view ${paths.length === 1 ? 'it' : 'them'} directly. Respond to the media content.</instruction>`;
+        const t = currentMsg.type!;
+        const noun = paths.length === 1 ? `a ${t}` : `${paths.length} ${t}s`;
+        const how = ['image', 'photo'].includes(t)
+          ? 'view directly as images'
+          : t === 'document' || t === 'pdf'
+            ? 'read the document contents'
+            : 'read the file contents';
+        context += `\n<instruction>The user sent ${noun}. You can ${how} at the path${paths.length > 1 ? 's' : ''} above using the Read tool. Respond to the content.</instruction>`;
       }
     }
 
