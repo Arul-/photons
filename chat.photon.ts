@@ -20,15 +20,6 @@ export default class Chat extends Photon {
   private _handlers: Array<{ event: string; fn: (msg: any) => void; filter?: any }> = [];
   private _connected = false;
 
-  async onInitialize(ctx?: { reason?: string; oldInstance?: any }): Promise<void> {
-    if (ctx?.reason === 'hot-reload' && ctx.oldInstance) {
-      const old = ctx.oldInstance;
-      this._groups = old._groups || new Map();
-      this._handlers = old._handlers || [];
-      this._connected = old._connected || false;
-    }
-  }
-
   // ─── Channel Interface (wire-compatible with WhatsApp/Telegram) ───
 
   /**
