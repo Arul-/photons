@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import pino from 'pino';
+import sharp from 'sharp';
 
 import makeWASocket, {
   Browsers,
@@ -37,7 +38,7 @@ const LEGACY_MEDIA_DIR = path.join(os.homedir(), '.photon', 'data', 'whatsapp', 
  * @tags whatsapp, messaging, nanoclaw
  * @stateful
  * @noworker
- * @dependencies @whiskeysockets/baileys@^7.0.0-rc.9, pino@^9.0.0
+ * @dependencies @whiskeysockets/baileys@^7.0.0-rc.9, pino@^9.0.0, sharp
  * @ui dashboard ./ui/dashboard.html
  */
 export default class WhatsApp extends Photon {
@@ -1164,7 +1165,39 @@ export default class WhatsApp extends Photon {
     if (buffer.length > MAX_DOWNLOAD_BYTES) return;
 
     await fs.promises.writeFile(filePath, buffer);
-    inbound.filePath = filePath;
+
+    // Compress images for efficient LLM consumption
+    if (['image', 'sticker'].includes(inbound.type)) {
+      inbound.filePath = await this._compressImage(filePath);
+    } else {
+      inbound.filePath = filePath;
+    }
+  }
+
+  /**
+   * Compress an image in-place: resize to max 2048px, JPEG quality 80.
+   * Skips files already under 500 KB. Converts PNG/WebP to JPEG.
+   * Returns the final file path (may change extension).
+   */
+  private async _compressImage(filePath: string): Promise<string> {
+    try {
+      const stat = await fs.promises.stat(filePath);
+      if (stat.size < 512 * 1024) return filePath; // already small enough
+
+      const compressed = await sharp(filePath)
+        .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 80 })
+        .toBuffer();
+
+      // Only replace if compression actually helped
+      if (compressed.length < stat.size) {
+        const jpgPath = filePath.replace(/\.\w+$/, '.jpg');
+        await fs.promises.writeFile(jpgPath, compressed);
+        if (jpgPath !== filePath) await fs.promises.unlink(filePath).catch(() => {});
+        return jpgPath;
+      }
+    } catch { /* non-critical — keep the original */ }
+    return filePath;
   }
 
   /** Map common MIME types to file extensions */

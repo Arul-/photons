@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import sharp from 'sharp';
 
 import { Photon } from '@portel/photon-core';
 
@@ -19,6 +20,7 @@ const MAX_MESSAGE_LENGTH = 4096;
  * @version 1.0.0
  * @icon 🤖
  * @tags telegram, messaging, nanoclaw
+ * @dependencies sharp
  * @stateful
  * @noworker
  */
@@ -896,7 +898,38 @@ export default class Telegram extends Photon {
 
     const buffer = Buffer.from(await response.arrayBuffer());
     await fs.promises.writeFile(localPath, buffer);
-    inbound.filePath = localPath;
+
+    // Compress images for efficient LLM consumption
+    if (['photo', 'sticker'].includes(inbound.type)) {
+      inbound.filePath = await this._compressImage(localPath);
+    } else {
+      inbound.filePath = localPath;
+    }
+  }
+
+  /**
+   * Compress an image in-place: resize to max 2048px, JPEG quality 80.
+   * Skips files already under 500 KB. Converts PNG/WebP to JPEG.
+   * Returns the final file path (may change extension).
+   */
+  private async _compressImage(filePath: string): Promise<string> {
+    try {
+      const stat = await fs.promises.stat(filePath);
+      if (stat.size < 512 * 1024) return filePath;
+
+      const compressed = await sharp(filePath)
+        .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 80 })
+        .toBuffer();
+
+      if (compressed.length < stat.size) {
+        const jpgPath = filePath.replace(/\.\w+$/, '.jpg');
+        await fs.promises.writeFile(jpgPath, compressed);
+        if (jpgPath !== filePath) await fs.promises.unlink(filePath).catch(() => {});
+        return jpgPath;
+      }
+    } catch { /* non-critical — keep the original */ }
+    return filePath;
   }
 
   /** Map MIME types to file extensions */
