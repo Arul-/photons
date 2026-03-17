@@ -1629,7 +1629,7 @@
   async function loadHistory() {
     if (!state.selectedGroup) return;
     try {
-      const raw = await window.photon.callTool('history', { group: state.selectedGroup, count: 20 });
+      const raw = await window.photon.callTool('evolution', { group: state.selectedGroup, count: 20 });
       const entries = parseMCP(raw) || [];
       renderHistory(entries);
     } catch (e) {

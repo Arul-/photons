@@ -564,24 +564,6 @@ export default class Claw extends Photon {
   }
 
   /**
-   * Clear the agent session for a group, forcing fresh context on next message.
-   *
-   * @title Reset Session
-   * @destructive
-   * @param group Group name (partial match) {@example "Arul and Lura"}
-   */
-  async reset(params: { group: string }): Promise<void> {
-    const query = params.group.toLowerCase();
-    const name = Object.keys(this.registry).find(k => k.toLowerCase().includes(query));
-    if (!name) throw new Error(`No registered group matching "${params.group}"`);
-    const config = this.registry[name];
-    delete this.sessionMap[config.folders[0]]; // legacy bare key
-    delete this.sessionMap[`${config.agent}:${config.folders[0]}`];
-    await this.memory.set('sessionMap', this.sessionMap);
-    this.emit({ type: 'session_reset', group: name });
-  }
-
-  /**
    * Clear the in-memory message log for a group.
    *
    * @title Clear Log
@@ -2089,6 +2071,7 @@ Respond in EXACTLY this format (include all three sections even if empty):
    *
    * @title Agent Persona
    * @internal
+   * @audience user
    * @param group Group name (partial match)
    * @param content New persona content (omit to view)
    */
@@ -2110,6 +2093,8 @@ Respond in EXACTLY this format (include all three sections even if empty):
    *
    * @title Agent Journal
    * @internal
+   * @audience user
+   * @readOnly
    * @param group Group name (partial match)
    * @param days Number of days to look back (default 7)
    */
@@ -2126,6 +2111,8 @@ Respond in EXACTLY this format (include all three sections even if empty):
    *
    * @title Agent Proposals
    * @internal
+   * @audience user
+   * @readOnly
    * @param group Group name (partial match)
    */
   async proposals(params: { group: string }): Promise<any[]> {
@@ -2141,6 +2128,7 @@ Respond in EXACTLY this format (include all three sections even if empty):
    *
    * @title Approve Proposal
    * @internal
+   * @audience user
    * @param group Group name (partial match)
    * @param proposal Proposal name to approve
    */
@@ -2157,6 +2145,7 @@ Respond in EXACTLY this format (include all three sections even if empty):
    *
    * @title Reject Proposal
    * @internal
+   * @audience user
    * @param group Group name (partial match)
    * @param proposal Proposal name to reject
    */
@@ -2173,6 +2162,7 @@ Respond in EXACTLY this format (include all three sections even if empty):
    *
    * @title Mentor Review
    * @internal
+   * @audience user
    * @param group Group name (partial match)
    */
   async review(params: { group: string }): Promise<any> {
@@ -2188,10 +2178,12 @@ Respond in EXACTLY this format (include all three sections even if empty):
    *
    * @title Evolution History
    * @internal
+   * @audience user
+   * @readOnly
    * @param group Group name (partial match)
    * @param count Number of commits to show (default 20)
    */
-  async history(params: { group: string; count?: number }): Promise<any[]> {
+  async evolution(params: { group: string; count?: number }): Promise<any[]> {
     const query = params.group.toLowerCase();
     const name = Object.keys(this.registry).find(k => k.toLowerCase().includes(query));
     if (!name) throw new Error(`No registered group matching "${params.group}"`);
