@@ -1,8 +1,7 @@
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import pino from 'pino';
-import sharp from 'sharp';
+const sharp = await import('sharp').then(m => m.default, () => null);
 
 import makeWASocket, {
   Browsers,
@@ -11,6 +10,7 @@ import makeWASocket, {
   WASocket,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
+  fetchLatestWaWebVersion,
 } from '@whiskeysockets/baileys';
 
 import { Photon } from '@portel/photon-core';
@@ -24,9 +24,6 @@ const debugLogger = pino({ level: 'debug' });
 /** Max age for queued messages before they're dropped on flush (1 hour) */
 const MESSAGE_TTL_MS = 60 * 60 * 1000;
 
-/** @deprecated Use this.storage('media') instead — kept for backward compat fallback */
-const LEGACY_MEDIA_DIR = path.join(os.homedir(), '.photon', 'data', 'whatsapp', 'media');
-
 /**
  * WhatsApp — live WhatsApp connection via Baileys.
  *
@@ -38,7 +35,7 @@ const LEGACY_MEDIA_DIR = path.join(os.homedir(), '.photon', 'data', 'whatsapp', 
  * @tags whatsapp, messaging, nanoclaw
  * @stateful
  * @noworker
- * @dependencies @whiskeysockets/baileys@^7.0.0-rc.9, pino@^9.0.0, sharp
+ * @dependencies @whiskeysockets/baileys@^7.0.0-rc.9, pino@^9.0.0, sharp?
  * @ui dashboard ./ui/dashboard.html
  */
 export default class WhatsApp extends Photon {
@@ -71,12 +68,6 @@ export default class WhatsApp extends Photon {
   private _connectPromise: Promise<any> | null = null;
   private _destroyed = false;
   private _pendingMessages: Array<{ chatJid: string; message: InboundMessage }> = [];
-  private _eventListeners: Array<{
-    event: string;
-    fn: (data: any) => void;
-    filter?: { group?: string; jid?: string; trigger?: string; fromMe?: boolean };
-    resolvedJid?: string; // cached JID from group name lookup
-  }> = [];
 
   /** Pass a custom auth directory, or leave empty to use this.storage('auth') */
   constructor(private _authDir: string = '') {
@@ -84,16 +75,11 @@ export default class WhatsApp extends Photon {
   }
 
   private get authDir(): string {
-    if (this._authDir) return this._authDir;
-    // Use new storage API if available (runtime-injected _photonFilePath)
-    if (this._photonFilePath) return this.storage('auth');
-    // Legacy fallback for older runtimes
-    return path.join(os.homedir(), '.photon', 'data', 'whatsapp', 'auth');
+    return this._authDir || this.storage('auth');
   }
 
   private get mediaDir(): string {
-    if (this._photonFilePath) return this.storage('media');
-    return LEGACY_MEDIA_DIR;
+    return this.storage('media');
   }
 
   private get _logger() {
@@ -106,45 +92,28 @@ export default class WhatsApp extends Photon {
     // This avoids destroying the WhatsApp session (which could trigger 440 bans).
     if (ctx?.reason === 'hot-reload' && ctx.oldInstance) {
       const old = ctx.oldInstance;
-      // Transfer state regardless of connection status
-      this.sock = old.sock || null;
-      this.connected = old.connected || false;
-      this.phoneNumber = old.phoneNumber || '';
-      this.knownGroups = old.knownGroups || {};
-      this.outgoingQueue = old.outgoingQueue || [];
-      this._pendingMessages = old._pendingMessages || [];
-      this._eventListeners = old._eventListeners || [];
-      this._lastQR = old._lastQR || null;
-      this._connectPromise = old._connectPromise || null;
-      this.reconnectAttempts = old.reconnectAttempts || 0;
-      this._lastConnectedAt = old._lastConnectedAt || 0;
-      this._groupsSynced = old._groupsSynced || false;
-      this._rebuildGroupIndex();
-      // Transfer sync timer — old one gets killed via _destroyed flag
-      if (old._syncTimer) clearInterval(old._syncTimer);
-      this._startPeriodicSync();
-
-      // Mark old instance as destroyed so its stale timers don't interfere
+      // Properties already auto-transferred by runtime — only handle non-copyable resources
       old._destroyed = true;
       old.connected = false;
       old._connectPromise = null;
-      // Don't null old.sock — we transferred it, and we need to re-wire events below
 
-      // Re-wire socket events on this new instance (old handlers are bound to old instance)
+      this._rebuildGroupIndex();
+      if (old._syncTimer) clearInterval(old._syncTimer);
+      this._startPeriodicSync();
+
+      // Re-wire socket events (bound to old instance, need to rebind to this)
       if (this.sock) {
         this.sock.ev.removeAllListeners('connection.update');
         this.sock.ev.removeAllListeners('messages.upsert');
-        // saveCreds is already wired and doesn't reference 'this', so leave it
         const { saveCreds } = await useMultiFileAuthState(this.authDir);
         this._wireSocketEvents(saveCreds);
       }
-      // Now null the old socket ref
       old.sock = null;
 
       if (this.connected) {
         this.emit({ type: 'hot_reload_transferred', phone: this.phoneNumber });
       }
-      return; // Don't auto-connect — preserve current state
+      return;
     }
 
     // Normal startup: auto-connect if we have saved credentials
@@ -212,6 +181,9 @@ export default class WhatsApp extends Photon {
     try {
       const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
 
+      // Fetch latest WhatsApp Web version to avoid 405 rejections
+      const { version } = await fetchLatestWaWebVersion().catch(() => ({ version: undefined }));
+
       this.sock = makeWASocket({
         auth: {
           creds: state.creds,
@@ -220,6 +192,7 @@ export default class WhatsApp extends Photon {
         printQRInTerminal: false,
         logger: this._logger,
         browser: Browsers.macOS('Chrome'),
+        ...(version ? { version } : {}),
       });
 
       // Wire persistent event handlers (messages, creds, reconnect)
@@ -595,39 +568,26 @@ export default class WhatsApp extends Photon {
    * // By JID directly
    * whatsapp.on('message', handler, { jid: '120363406704631066@g.us' })
    */
-  on(event: string, fn: (data: any) => void, filter?: { group?: string; jid?: string; trigger?: string; fromMe?: boolean }): void {
-    const entry: typeof this._eventListeners[0] = { event, fn, filter };
-
-    // Resolve group name → JID eagerly if groups are already known
-    if (filter?.group) {
-      const query = filter.group.toLowerCase();
-      const jid = this._groupNameIndex.get(query)
-        || [...this._groupNameIndex.entries()].find(([name]) => name.includes(query))?.[1];
-      if (jid) entry.resolvedJid = jid;
+  on(event: string, fn: (data: any) => void, filter?: { group?: string; jid?: string; chatId?: string; trigger?: string; fromMe?: boolean }): void {
+    // Translate jid filter → chatId for runtime's _matchesFilter compatibility
+    if (filter?.jid && !filter.chatId) {
+      filter.chatId = filter.jid;
     }
 
-    // If a JID- or group-name-filtered listener for this event already exists, replace it.
+    // If a chatId- or group-name-filtered listener for this event already exists, replace it.
     // This prevents stale handlers accumulating across claw restarts where the
     // new instance has no reference to the old handler functions.
-    if (filter?.jid || filter?.group) {
-      const idx = this._eventListeners.findIndex(e =>
+    const matchId = filter?.chatId || filter?.jid;
+    if (matchId || filter?.group) {
+      const idx = (this as any)._eventListeners.findIndex((e: any) =>
         e.event === event &&
-        ((filter.jid && e.filter?.jid === filter.jid) ||
-         (filter.group && e.filter?.group === filter.group))
+        ((matchId && (e.filter?.chatId === matchId || e.filter?.jid === matchId)) ||
+         (filter!.group && e.filter?.group === filter!.group))
       );
-      if (idx !== -1) this._eventListeners.splice(idx, 1);
+      if (idx !== -1) (this as any)._eventListeners.splice(idx, 1);
     }
 
-    this._eventListeners.push(entry);
-  }
-
-  /**
-   * Unsubscribe from events.
-   * @internal
-   */
-  off(event: string, fn: (data: any) => void): void {
-    const idx = this._eventListeners.findIndex(e => e.event === event && e.fn === fn);
-    if (idx !== -1) this._eventListeners.splice(idx, 1);
+    (this as any)._eventListeners.push({ event, fn, filter });
   }
 
   /**
@@ -1108,11 +1068,10 @@ export default class WhatsApp extends Photon {
     this.knownGroups[jid] = newName;
 
     if (oldName) {
-      // Name changed on a known group — notify subscribers
       this.emit({ type: 'group:renamed', jid, oldName, newName });
 
       // Update listener filters that referenced the old name
-      for (const entry of this._eventListeners) {
+      for (const entry of (this as any)._eventListeners) {
         if (entry.filter?.group && entry.filter.group.toLowerCase() === oldName.toLowerCase()) {
           entry.filter.group = newName;
         }
@@ -1335,32 +1294,9 @@ export default class WhatsApp extends Photon {
           this._pendingMessages.splice(0, this._pendingMessages.length - 1000);
         }
 
-        // Notify direct listeners (e.g. claw via this.whatsapp.on('message', ...))
-        for (const entry of this._eventListeners) {
-          if (entry.event !== 'message') continue;
-          const f = entry.filter;
-          if (f) {
-            // JID filter (direct or resolved from group name)
-            if (f.jid && f.jid !== chatJid) continue;
-            if (f.group) {
-              // Lazy-resolve group name if not yet resolved
-              if (!entry.resolvedJid) {
-                const query = f.group.toLowerCase();
-                const jid = this._groupNameIndex.get(query)
-                  || [...this._groupNameIndex.entries()].find(([name]) => name.includes(query))?.[1];
-                if (jid) entry.resolvedJid = jid;
-              }
-              if (entry.resolvedJid && entry.resolvedJid !== chatJid) continue;
-            }
-            if (f.trigger && !inbound.content.includes(f.trigger)) continue;
-            if (f.fromMe !== undefined && f.fromMe !== inbound.fromMe) continue;
-          }
-          try {
-            entry.fn({ chatJid, message: inbound });
-          } catch (err: any) {
-            this.emit({ type: 'error', source: 'event_listener', error: err.message });
-          }
-        }
+        // Dispatch to subscribers via runtime-injected _dispatch
+        const groupName = this.knownGroups[chatJid];
+        (this as any)._dispatch(chatJid, inbound, groupName);
 
         // Emit on channel — framework auto-prefixes with photon name ('whatsapp:messages')
         this.emit({
@@ -1508,6 +1444,9 @@ export default class WhatsApp extends Photon {
     if (this._destroyed) return; // Old instance after hot-reload — don't reconnect
     const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
 
+    // Fetch latest WhatsApp Web version to avoid 405 rejections
+    const { version } = await fetchLatestWaWebVersion().catch(() => ({ version: undefined }));
+
     this.sock = makeWASocket({
       auth: {
         creds: state.creds,
@@ -1516,6 +1455,7 @@ export default class WhatsApp extends Photon {
       printQRInTerminal: false,
       logger: this._logger,
       browser: Browsers.macOS('Chrome'),
+      ...(version ? { version } : {}),
     });
 
     this._wireSocketEvents(saveCreds);
