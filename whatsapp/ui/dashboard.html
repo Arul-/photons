@@ -586,12 +586,33 @@
           <p>Select a group from the sidebar to view details and send messages</p>
         </div>
 
+        <!-- Get Ready State (pre-QR) -->
+        <div class="qr-container" id="readyState" style="display: none;">
+          <div style="font-size: 48px; margin-bottom: 16px;">📱</div>
+          <h2>Get Your Phone Ready</h2>
+          <div style="text-align: left; max-width: 320px; margin: 16px auto; line-height: 1.8;">
+            <p><strong>1.</strong> Open WhatsApp on your phone</p>
+            <p><strong>2.</strong> Tap <strong>Settings → Linked Devices</strong></p>
+            <p><strong>3.</strong> Tap <strong>Link a Device</strong></p>
+          </div>
+          <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">When you see the camera viewfinder, click below.</p>
+          <button class="btn btn-primary" id="readyBtn" style="padding: 10px 32px; font-size: 15px;">I'm Ready to Scan</button>
+        </div>
+
         <!-- QR Code State -->
         <div class="qr-container" id="qrState" style="display: none;">
-          <h2>Scan QR Code</h2>
-          <p>Open WhatsApp on your phone, go to Linked Devices, and scan this code.</p>
-          <div class="qr-code" id="qrCode"></div>
-          <p style="font-size: 12px; color: var(--text-muted);">QR code refreshes automatically.</p>
+          <h2>Scan Now</h2>
+          <p>Point your phone's camera at this code.</p>
+          <div style="position: relative; display: inline-block;">
+            <svg id="qrTimer" width="316" height="316" style="position: absolute; top: -8px; left: -8px; pointer-events: none;">
+              <circle cx="158" cy="158" r="154" fill="none" stroke="var(--border-color)" stroke-width="3" opacity="0.3"/>
+              <circle id="qrTimerRing" cx="158" cy="158" r="154" fill="none" stroke="var(--accent)" stroke-width="3"
+                stroke-dasharray="967.6" stroke-dashoffset="0" stroke-linecap="round"
+                transform="rotate(-90 158 158)" style="transition: stroke-dashoffset 1s linear;"/>
+            </svg>
+            <div class="qr-code" id="qrCode"></div>
+          </div>
+          <p id="qrCountdown" style="font-size: 13px; color: var(--text-muted); margin-top: 8px;">Refreshes in ~20s</p>
         </div>
 
         <!-- Group Detail Panel -->
@@ -939,11 +960,39 @@
       }).join('');
     }
 
+    let qrCountdownTimer = null;
+    let qrSecondsLeft = 20;
+
     function showQR(qrData) {
       $('emptyState').style.display = 'none';
       $('groupPanel').style.display = 'none';
+      $('readyState').style.display = 'none';
       $('qrState').style.display = 'flex';
-      window.photon.renderQR($('qrCode'), qrData, { size: 300, errorCorrection: 'L' });
+
+      // Flash the QR container on refresh so user knows to scan NOW
+      const qrEl = $('qrCode');
+      qrEl.style.transition = 'box-shadow 0.3s ease';
+      qrEl.style.boxShadow = '0 0 20px rgba(37, 211, 102, 0.6)';
+      setTimeout(() => { qrEl.style.boxShadow = 'none'; }, 1500);
+
+      window.photon.renderQR(qrEl, qrData, { size: 300, errorCorrection: 'L' });
+
+      // Reset countdown
+      qrSecondsLeft = 20;
+      const ring = $('qrTimerRing');
+      const circumference = 967.6;
+      ring.style.strokeDashoffset = '0';
+
+      clearInterval(qrCountdownTimer);
+      qrCountdownTimer = setInterval(() => {
+        qrSecondsLeft--;
+        const progress = (20 - qrSecondsLeft) / 20;
+        ring.style.strokeDashoffset = (circumference * progress).toString();
+        $('qrCountdown').textContent = qrSecondsLeft > 0 ? `Refreshes in ~${qrSecondsLeft}s` : 'Refreshing...';
+        if (qrSecondsLeft <= 5) ring.style.stroke = '#f59e0b';
+        else ring.style.stroke = 'var(--accent)';
+        if (qrSecondsLeft <= 0) clearInterval(qrCountdownTimer);
+      }, 1000);
     }
 
     // ── Actions ──
@@ -1007,22 +1056,30 @@
         } catch (e) { toast('Disconnect failed', 'error'); }
         return;
       }
-      $('connectBtn').disabled = true;
-      $('connectBtn').textContent = 'Connecting...';
+      // Show "Get Ready" screen instead of immediately generating QR
+      $('emptyState').style.display = 'none';
+      $('groupPanel').style.display = 'none';
+      $('qrState').style.display = 'none';
+      $('readyState').style.display = 'flex';
+    }
+
+    async function startQRConnect() {
+      $('readyBtn').disabled = true;
+      $('readyBtn').textContent = 'Generating QR...';
       try {
         const raw = await window.photon.callTool('connect', {});
         const data = parseMCP(raw);
         if (data.status === 'qr_pending' && data.qr) {
           showQR(data.qr); state.status = 'qr_pending'; renderStatus();
-          toast('Scan QR code with WhatsApp', 'info');
           pollConnection();
         } else if (data.status === 'connected' || data.status === 'already_connected') {
           state.status = 'connected'; state.phone = data.phone || '';
-          renderStatus(); $('qrState').style.display = 'none'; $('emptyState').style.display = 'flex';
+          renderStatus(); $('readyState').style.display = 'none'; $('qrState').style.display = 'none';
+          $('emptyState').style.display = 'flex';
           toast('Connected!', 'success'); loadGroups();
         }
-      } catch (e) { toast('Connection failed', 'error'); }
-      finally { $('connectBtn').disabled = false; renderStatus(); }
+      } catch (e) { toast('Connection failed — try again', 'error'); }
+      finally { $('readyBtn').disabled = false; $('readyBtn').textContent = "I'm Ready to Scan"; }
     }
 
     let pollTimer;
@@ -1031,8 +1088,9 @@
       pollTimer = setInterval(async () => {
         await refreshStatus();
         if (state.status === 'connected') {
-          clearInterval(pollTimer);
-          $('qrState').style.display = 'none'; $('emptyState').style.display = 'flex';
+          clearInterval(pollTimer); clearInterval(qrCountdownTimer);
+          $('qrState').style.display = 'none'; $('readyState').style.display = 'none';
+          $('emptyState').style.display = 'flex';
           toast('Connected!', 'success'); loadGroups();
         }
       }, 3000);
@@ -1224,6 +1282,7 @@
 
     // ── Event Listeners ──
     $('connectBtn').addEventListener('click', connectWhatsApp);
+    $('readyBtn').addEventListener('click', startQRConnect);
     $('refreshBtn').addEventListener('click', () => {
       refreshStatus();
       if (state.status === 'connected') loadGroups();
