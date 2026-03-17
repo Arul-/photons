@@ -1148,10 +1148,20 @@ export default class WhatsApp extends Photon {
       return;
     }
 
+    // Skip files larger than 20 MB to avoid blocking the message pipeline.
+    // Check proto fileLength before downloading when available.
+    const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
+    const m = msg.message;
+    const proto = m?.imageMessage || m?.videoMessage || m?.audioMessage || m?.documentMessage;
+    if (proto?.fileLength && Number(proto.fileLength) > MAX_DOWNLOAD_BYTES) return;
+
     const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
       logger: this._logger,
       reuploadRequest: this.sock!.updateMediaMessage,
     });
+
+    // Double-check actual size after download
+    if (buffer.length > MAX_DOWNLOAD_BYTES) return;
 
     await fs.promises.writeFile(filePath, buffer);
     inbound.filePath = filePath;
@@ -1250,6 +1260,8 @@ export default class WhatsApp extends Photon {
     this.sock.ev.on('creds.update', saveCreds);
 
     this.sock.ev.on('messages.upsert', async ({ messages }) => {
+      // Extract all messages first, kick off media downloads in parallel
+      const parsed: { msg: any; chatJid: string; inbound: any; download?: Promise<void> }[] = [];
       for (const msg of messages) {
         if (!msg.message) continue;
         const rawJid = msg.key.remoteJid;
@@ -1267,14 +1279,21 @@ export default class WhatsApp extends Photon {
           messageId, chatJid, sender, senderName, timestamp, fromMe,
         });
 
-        // Download media for supported types — await so filePath is set before dispatch
+        // Start media downloads concurrently — don't block text messages behind slow downloads
+        let download: Promise<void> | undefined;
         if (inbound.media && ['image', 'video', 'audio', 'document', 'sticker'].includes(inbound.type)) {
-          try {
-            await this._downloadMedia(msg, inbound);
-          } catch (err: any) {
+          download = this._downloadMedia(msg, inbound).catch((err: any) => {
             this.emit({ type: 'error', source: 'media_download', error: err.message });
-          }
+          });
         }
+
+        parsed.push({ msg, chatJid, inbound, download });
+      }
+
+      // Dispatch sequentially — but media downloads are already in flight
+      for (const { chatJid, inbound, download } of parsed) {
+        // Wait for this message's download (if any) before dispatching
+        if (download) await download;
 
         // Buffer for polling via pending()
         this._pendingMessages.push({ chatJid, message: inbound });
@@ -1301,7 +1320,7 @@ export default class WhatsApp extends Photon {
               if (entry.resolvedJid && entry.resolvedJid !== chatJid) continue;
             }
             if (f.trigger && !inbound.content.includes(f.trigger)) continue;
-            if (f.fromMe !== undefined && f.fromMe !== fromMe) continue;
+            if (f.fromMe !== undefined && f.fromMe !== inbound.fromMe) continue;
           }
           try {
             entry.fn({ chatJid, message: inbound });

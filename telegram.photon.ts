@@ -881,9 +881,13 @@ export default class Telegram extends Photon {
       return;
     }
 
-    // Get file path from Telegram API
+    // Get file metadata from Telegram API
     const fileInfo = await this._api('getFile', { file_id: fileId });
     if (!fileInfo?.file_path) return;
+
+    // Skip files larger than 20 MB to avoid blocking the message pipeline
+    const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
+    if (fileInfo.file_size && fileInfo.file_size > MAX_DOWNLOAD_BYTES) return;
 
     // Download the file
     const url = `https://api.telegram.org/file/bot${this._token}/${fileInfo.file_path}`;

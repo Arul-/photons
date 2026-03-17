@@ -22,25 +22,28 @@ export default class Chat extends Photon {
 
   protected settings = { defaultGroup: 'General' };
 
+  /** In-memory index: lowercase group name → instance name. Rebuilt on connect, updated on create. */
+  private _nameIndex = new Map<string, string>();
+  /** Tracks which instance names have had handlers registered via on(). */
+  private _handlerInstances = new Set<string>();
+
   /** @title Connect */
   async connect() {
-    const groups = await this._groupNames();
-    if (!groups.length) await this._createGroup(this.settings.defaultGroup);
+    await this._rebuildIndex();
+    if (this._nameIndex.size === 0) await this._createGroup(this.settings.defaultGroup);
     return { status: 'connected', message: 'Chat channel ready' };
   }
 
   /** @title Status @readOnly */
   async status() {
-    return { status: 'connected', groups: (await this._groupNames()).length };
+    return { status: 'connected', groups: this._nameIndex.size };
   }
 
   /** @title Groups @readOnly */
   async groups() {
     const result: { name: string; chatId: string }[] = [];
-    for await (const inst of this.allInstances()) {
-      if (inst.name !== 'default' && inst.state?.name) {
-        result.push({ name: inst.state.name, chatId: inst.name });
-      }
+    for (const [, instName] of this._nameIndex) {
+      result.push({ name: instName, chatId: instName });
     }
     return result;
   }
@@ -103,19 +106,37 @@ export default class Chat extends Photon {
    */
   async on(event: string, fn: (data: any) => void, filter?: any) {
     if (filter?.group) {
-      const target = await this._target(filter.group);
+      const instName = this._resolveInstanceName(filter.group);
+      // Ensure instance exists (creates if needed, handles pre-persistence window)
+      const target = await (this as any).instance(instName);
       target._eventListeners.push({ event, fn, filter });
+      this._handlerInstances.add(instName);
     } else {
       (this as any)._eventListeners?.push({ event, fn, filter });
     }
   }
 
-  /** @internal */
+  /**
+   * Unsubscribe — searches router and all group instances that have handlers.
+   * @internal
+   */
   async off(event: string, fn: (data: any) => void) {
-    const listeners = (this as any)._eventListeners;
-    if (!listeners) return;
-    const idx = listeners.findIndex((e: any) => e.event === event && e.fn === fn);
-    if (idx !== -1) listeners.splice(idx, 1);
+    // Search router's own listeners
+    const selfListeners = (this as any)._eventListeners;
+    if (selfListeners) {
+      const idx = selfListeners.findIndex((e: any) => e.event === event && e.fn === fn);
+      if (idx !== -1) { selfListeners.splice(idx, 1); return; }
+    }
+    // Search group instances that have handlers registered
+    for (const instName of this._handlerInstances) {
+      try {
+        const inst = await (this as any).instance(instName);
+        const listeners = inst._eventListeners;
+        if (!listeners) continue;
+        const idx = listeners.findIndex((e: any) => e.event === event && e.fn === fn);
+        if (idx !== -1) { listeners.splice(idx, 1); return; }
+      } catch { /* instance may have been removed */ }
+    }
   }
 
   /** @title Edit @internal */
@@ -135,37 +156,55 @@ export default class Chat extends Photon {
 
   // ─── Private ───
 
+  /** Rebuild the in-memory name→instanceName index from persisted state. */
+  private async _rebuildIndex(): Promise<void> {
+    this._nameIndex.clear();
+    for await (const entry of this.allInstances()) {
+      if (entry.name === 'default' || !entry.state?.name) continue;
+      this._nameIndex.set(entry.state.name.toLowerCase(), entry.name);
+    }
+  }
+
   private async _createGroup(name: string): Promise<void> {
     const inst = await (this as any).instance(name);
     inst.name = name;
+    this._nameIndex.set(name.toLowerCase(), name);
     this.emit({ type: 'group_created', name, id: name });
   }
 
-  private async _target(nameOrId: string): Promise<any> {
-    // Scan persisted instances for exact or fuzzy match
-    for await (const entry of this.allInstances()) {
-      if (entry.name === 'default') continue;
-      if (entry.name === nameOrId || entry.state?.name === nameOrId) {
-        return (this as any).instance(entry.name);
-      }
+  /**
+   * Resolve a group name/ID to the instance name using the in-memory index.
+   * Falls back to fuzzy (substring) match. Does NOT create instances.
+   */
+  private _resolveInstanceName(nameOrId: string): string {
+    // Exact match in index (by instance name = group name)
+    const lower = nameOrId.toLowerCase();
+    if (this._nameIndex.has(lower)) return this._nameIndex.get(lower)!;
+    // Check if nameOrId IS an instance name directly
+    for (const instName of this._nameIndex.values()) {
+      if (instName === nameOrId) return instName;
     }
-    // Fuzzy match
-    const q = nameOrId.toLowerCase();
-    for await (const entry of this.allInstances()) {
-      if (entry.name === 'default') continue;
-      if (entry.state?.name?.toLowerCase().includes(q)) {
-        return (this as any).instance(entry.name);
-      }
+    // Fuzzy substring match
+    for (const [name, instName] of this._nameIndex) {
+      if (name.includes(lower)) return instName;
     }
-    throw new Error(`Group not found: ${nameOrId}`);
+    // Not found — return as-is (caller creates instance if needed)
+    return nameOrId;
   }
 
-  private async _groupNames(): Promise<string[]> {
-    const names: string[] = [];
-    for await (const inst of this.allInstances()) {
-      if (inst.name !== 'default' && inst.state?.name) names.push(inst.state.name);
+  private async _target(nameOrId: string): Promise<any> {
+    const instName = this._resolveInstanceName(nameOrId);
+    // Verify this instance actually exists (check index or persisted state)
+    if (!this._nameIndex.has(instName.toLowerCase())) {
+      // Not in index — might be stale. Rebuild once and retry.
+      await this._rebuildIndex();
+      const retry = this._resolveInstanceName(nameOrId);
+      if (!this._nameIndex.has(retry.toLowerCase())) {
+        throw new Error(`Group not found: ${nameOrId}`);
+      }
+      return (this as any).instance(retry);
     }
-    return names;
+    return (this as any).instance(instName);
   }
 
   /** Dispatch to target instance's event listeners. */
