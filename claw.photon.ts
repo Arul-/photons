@@ -1585,9 +1585,13 @@ export default class Claw extends Photon {
         const noun = paths.length === 1 ? `a ${t}` : `${paths.length} ${t}s`;
         const how = ['image', 'photo'].includes(t)
           ? 'view directly as images'
-          : t === 'document' || t === 'pdf'
-            ? 'read the document contents'
-            : 'read the file contents';
+          : t === 'audio'
+            ? 'listen to the audio'
+            : t === 'video'
+              ? 'view the video'
+              : t === 'document' || t === 'pdf'
+                ? 'read the document contents'
+                : 'read the file contents';
         context += `\n<instruction>The user sent ${noun}. You can ${how} at the path${paths.length > 1 ? 's' : ''} above using the Read tool. Respond to the content.</instruction>`;
       }
     }

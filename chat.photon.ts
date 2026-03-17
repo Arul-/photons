@@ -4,7 +4,12 @@ import sharp from 'sharp';
 import { Photon } from '@portel/photon-core';
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tiff']);
-const PASSTHROUGH_EXTS = new Set(['.pdf', '.txt', '.md', '.csv', '.json', '.xml', '.html', '.log']);
+const AUDIO_EXTS = new Set(['.ogg', '.mp3', '.m4a', '.wav', '.aac', '.flac', '.opus']);
+const PASSTHROUGH_EXTS = new Set([
+  '.pdf', '.txt', '.md', '.csv', '.json', '.xml', '.html', '.log',  // text/docs
+  '.ogg', '.mp3', '.m4a', '.wav', '.aac', '.flac', '.opus',         // audio
+  '.mp4', '.webm',                                                    // video
+]);
 
 /**
  * Chat — browser-based messaging channel for testing claw pipelines.
@@ -258,7 +263,8 @@ export default class Chat extends Photon {
     if (!paths.length) return 'text';
     const ext = path.extname(paths[0]).toLowerCase();
     if (IMAGE_EXTS.has(ext) || ext === '.jpg') return 'image';
-    if (ext === '.pdf') return 'document';
+    if (AUDIO_EXTS.has(ext)) return 'audio';
+    if (ext === '.mp4' || ext === '.webm') return 'video';
     return 'document';
   }
 
@@ -269,6 +275,9 @@ export default class Chat extends Photon {
       '.webp': 'image/webp', '.gif': 'image/gif', '.pdf': 'application/pdf',
       '.txt': 'text/plain', '.md': 'text/markdown', '.csv': 'text/csv',
       '.json': 'application/json', '.xml': 'application/xml', '.html': 'text/html',
+      '.ogg': 'audio/ogg', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4',
+      '.wav': 'audio/wav', '.aac': 'audio/aac', '.flac': 'audio/flac',
+      '.opus': 'audio/opus', '.mp4': 'video/mp4', '.webm': 'video/webm',
     };
     return map[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
   }
