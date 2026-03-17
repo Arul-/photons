@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="mcp:ui-size" content="minWidth=700;minHeight=400;maxHeight=800">
+  <title>Chat Channel</title>
+  <style>
+    :root {
+      --bg: #0d0d0d; --bg2: #1a1a1a; --bg3: #262626; --card: #1e1e1e;
+      --text: #e6e6e6; --text2: #a0a0a0; --muted: #666; --border: #333;
+      --accent: #3b82f6; --green: #10b981; --purple: #8b5cf6;
+      --user-bg: #1e3a5f; --agent-bg: #1a2e1a;
+    }
+    :root.light {
+      --bg: #f4f4f5; --bg2: #fafafa; --bg3: #e4e4e7; --card: #fff;
+      --text: #18181b; --text2: #52525b; --muted: #a1a1aa; --border: #d4d4d8;
+      --user-bg: #dbeafe; --agent-bg: #dcfce7;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { margin: 0; overflow: hidden; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg); color: var(--text); height: 100vh; display: flex;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: 240px; min-width: 240px; background: var(--bg2);
+      border-right: 1px solid var(--border); display: flex; flex-direction: column;
+    }
+    .sidebar-header {
+      padding: 10px 12px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .sidebar-header h2 { font-size: 14px; font-weight: 600; }
+    .sidebar-header .status {
+      font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 600;
+    }
+    .sidebar-header .status.on { background: rgba(16,185,129,.15); color: var(--green); }
+    .sidebar-header .status.off { background: var(--bg3); color: var(--muted); }
+    .group-list { flex: 1; overflow-y: auto; }
+    .group-item {
+      padding: 10px 12px; border-bottom: 1px solid var(--border);
+      cursor: pointer; transition: background .1s;
+    }
+    .group-item:hover { background: var(--bg3); }
+    .group-item.selected { background: rgba(59,130,246,.12); border-left: 3px solid var(--accent); padding-left: 9px; }
+    .group-item .gi-name { font-size: 13px; font-weight: 600; }
+    .group-item .gi-meta { font-size: 10px; color: var(--muted); margin-top: 2px; }
+    .group-item .gi-last { font-size: 11px; color: var(--text2); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* New group form */
+    .new-group {
+      padding: 8px 10px; border-top: 1px solid var(--border); flex-shrink: 0;
+    }
+    .new-group-row { display: flex; gap: 4px; }
+    .new-group input {
+      flex: 1; padding: 5px 8px; border-radius: 5px; border: 1px solid var(--border);
+      background: var(--bg3); color: var(--text); font-size: 12px; outline: none;
+    }
+    .new-group input:focus { border-color: var(--accent); }
+
+    /* Chat area */
+    .chat-area { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    .chat-header {
+      padding: 10px 16px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+    }
+    .chat-header h3 { font-size: 15px; font-weight: 600; }
+    .chat-header .typing-indicator { font-size: 11px; color: var(--muted); font-style: italic; }
+
+    .messages { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; }
+    .msg {
+      max-width: 75%; padding: 8px 12px; border-radius: 12px; font-size: 13px;
+      line-height: 1.5; word-break: break-word; position: relative;
+    }
+    .msg.user { align-self: flex-end; background: var(--user-bg); border-bottom-right-radius: 4px; }
+    .msg.agent { align-self: flex-start; background: var(--agent-bg); border-bottom-left-radius: 4px; }
+    .msg .msg-sender { font-size: 10px; font-weight: 600; color: var(--accent); margin-bottom: 2px; }
+    .msg.agent .msg-sender { color: var(--green); }
+    .msg .msg-time { font-size: 9px; color: var(--muted); margin-top: 3px; text-align: right; }
+    .msg .msg-text { white-space: pre-wrap; }
+
+    .empty-chat {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      color: var(--muted); font-size: 13px; text-align: center; padding: 20px;
+    }
+
+    /* Input bar */
+    .input-bar {
+      padding: 8px 12px; border-top: 1px solid var(--border);
+      display: flex; gap: 6px; flex-shrink: 0; align-items: flex-end;
+    }
+    .input-bar .sender-field {
+      width: 80px; padding: 7px 8px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--bg3); color: var(--text); font-size: 12px; outline: none;
+    }
+    .input-bar textarea {
+      flex: 1; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--bg3); color: var(--text); font-size: 13px; font-family: inherit;
+      outline: none; resize: none; min-height: 36px; max-height: 100px;
+    }
+    .input-bar textarea:focus { border-color: var(--accent); }
+    .btn {
+      padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 600;
+      border: none; cursor: pointer; transition: background .15s; white-space: nowrap;
+    }
+    .btn-send { background: var(--accent); color: #fff; }
+    .btn-send:hover { background: #2563eb; }
+    .btn-sm { padding: 5px 10px; font-size: 11px; background: var(--bg3); color: var(--text); border: 1px solid var(--border); }
+    .btn-sm:hover { background: var(--border); }
+  </style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<div class="sidebar">
+  <div class="sidebar-header">
+    <h2>Chat</h2>
+    <span class="status off" id="statusBadge">offline</span>
+  </div>
+  <div class="group-list" id="groupList">
+    <div class="empty-chat" style="padding:30px 12px;font-size:11px;">
+      <p>No groups yet. Create one below.</p>
+    </div>
+  </div>
+  <div class="new-group">
+    <div class="new-group-row">
+      <input type="text" id="newGroupInput" placeholder="New group name...">
+      <button class="btn btn-sm" id="createGroupBtn">+</button>
+    </div>
+  </div>
+</div>
+
+<!-- Chat Area -->
+<div class="chat-area">
+  <div class="chat-header" id="chatHeader" style="display:none;">
+    <h3 id="chatGroupName">Group</h3>
+    <span class="typing-indicator" id="typingIndicator" style="display:none;">typing...</span>
+  </div>
+
+  <div class="messages" id="messagesArea">
+    <div class="empty-chat">Select or create a group to start chatting</div>
+  </div>
+
+  <div class="input-bar" id="inputBar" style="display:none;">
+    <input type="text" class="sender-field" id="senderField" value="Arul" placeholder="Name">
+    <textarea id="messageInput" placeholder="Type a message..." rows="1"></textarea>
+    <button class="btn btn-send" id="sendBtn">Send</button>
+  </div>
+</div>
+
+<script>
+  const state = { groups: [], selected: null, messages: [], connected: false, typing: {} };
+  const $ = id => document.getElementById(id);
+
+  function parseMCP(raw) {
+    if (raw && raw.content && Array.isArray(raw.content)) {
+      const item = raw.content.find(c => c.type === 'text' && c.text);
+      if (item) { try { return JSON.parse(item.text); } catch { return item.text; } }
+    }
+    return raw;
+  }
+
+  function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+  function timeStr(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  // ─── Render ───
+
+  function renderGroups() {
+    const el = $('groupList');
+    if (state.groups.length === 0) {
+      el.innerHTML = '<div class="empty-chat" style="padding:30px 12px;font-size:11px;"><p>No groups yet. Create one below.</p></div>';
+      return;
+    }
+    el.innerHTML = state.groups.map(g => {
+      const sel = state.selected === g.name ? ' selected' : '';
+      const lastMsg = g.lastMessage || '';
+      return '<div class="group-item' + sel + '" data-name="' + esc(g.name) + '">' +
+        '<div class="gi-name">' + esc(g.name) + '</div>' +
+        '<div class="gi-meta">' + esc(g.chatId || '') + '</div>' +
+        (lastMsg ? '<div class="gi-last">' + esc(lastMsg) + '</div>' : '') +
+      '</div>';
+    }).join('');
+
+    el.querySelectorAll('.group-item').forEach(item => {
+      item.addEventListener('click', () => selectGroup(item.dataset.name));
+    });
+  }
+
+  function renderMessages() {
+    const area = $('messagesArea');
+    if (!state.selected) {
+      area.innerHTML = '<div class="empty-chat">Select or create a group to start chatting</div>';
+      $('chatHeader').style.display = 'none';
+      $('inputBar').style.display = 'none';
+      return;
+    }
+
+    $('chatHeader').style.display = '';
+    $('inputBar').style.display = '';
+    $('chatGroupName').textContent = state.selected;
+
+    if (state.messages.length === 0) {
+      area.innerHTML = '<div class="empty-chat">No messages yet. Send one to start the conversation.</div>';
+      return;
+    }
+
+    area.innerHTML = state.messages.map(m => {
+      const cls = m.fromMe ? 'agent' : 'user';
+      return '<div class="msg ' + cls + '">' +
+        '<div class="msg-sender">' + esc(m.senderName || m.sender) + '</div>' +
+        '<div class="msg-text">' + esc(m.content) + '</div>' +
+        '<div class="msg-time">' + timeStr(m.timestamp) + '</div>' +
+      '</div>';
+    }).join('');
+
+    area.scrollTop = area.scrollHeight;
+  }
+
+  // ─── Actions ───
+
+  async function loadGroups() {
+    try {
+      const raw = await window.photon.callTool('groups', {});
+      state.groups = parseMCP(raw) || [];
+      renderGroups();
+    } catch (e) { console.error('groups failed:', e); }
+  }
+
+  async function loadStatus() {
+    try {
+      const raw = await window.photon.callTool('status', {});
+      const s = parseMCP(raw);
+      state.connected = s && s.status === 'connected';
+      const badge = $('statusBadge');
+      badge.textContent = state.connected ? 'online' : 'offline';
+      badge.className = 'status ' + (state.connected ? 'on' : 'off');
+    } catch {}
+  }
+
+  async function connectChannel() {
+    try {
+      await window.photon.callTool('connect', {});
+      state.connected = true;
+      loadStatus();
+      loadGroups();
+    } catch (e) { console.error('connect failed:', e); }
+  }
+
+  async function selectGroup(name) {
+    state.selected = name;
+    renderGroups();
+    await loadMessages();
+  }
+
+  async function loadMessages() {
+    if (!state.selected) return;
+    try {
+      const raw = await window.photon.callTool('messages', { chat: state.selected, limit: 100 });
+      state.messages = parseMCP(raw) || [];
+      renderMessages();
+    } catch (e) { console.error('messages failed:', e); }
+  }
+
+  async function createGroup() {
+    const name = $('newGroupInput').value.trim();
+    if (!name) return;
+    try {
+      await window.photon.callTool('create', { name });
+      $('newGroupInput').value = '';
+      await loadGroups();
+      selectGroup(name);
+    } catch (e) { console.error('create failed:', e); }
+  }
+
+  async function sendMessage() {
+    if (!state.selected) return;
+    const text = $('messageInput').value.trim();
+    if (!text) return;
+    const sender = $('senderField').value.trim() || 'User';
+
+    $('messageInput').value = '';
+    $('messageInput').style.height = '36px';
+
+    try {
+      await window.photon.callTool('say', { chat: state.selected, text, sender });
+      await loadMessages();
+    } catch (e) { console.error('say failed:', e); }
+  }
+
+  // ─── Event Bindings ───
+
+  $('createGroupBtn').addEventListener('click', createGroup);
+  $('newGroupInput').addEventListener('keydown', e => { if (e.key === 'Enter') createGroup(); });
+  $('sendBtn').addEventListener('click', sendMessage);
+  $('messageInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  });
+  // Auto-grow textarea
+  $('messageInput').addEventListener('input', function() {
+    this.style.height = '36px';
+    this.style.height = Math.min(this.scrollHeight, 100) + 'px';
+  });
+
+  // ─── Live Updates ───
+
+  if (window.photon) {
+    window.photon.onResult((result) => {
+      const data = parseMCP(result);
+      if (!data || typeof data !== 'object') return;
+
+      // Refresh on events
+      if (data.type === 'message_sent' || data.type === 'message_received') {
+        if (state.selected && data.group === state.selected) loadMessages();
+        loadGroups();
+      }
+      if (data.type === 'typing') {
+        $('typingIndicator').style.display = data.typing ? '' : 'none';
+      }
+      if (data.type === 'group_created') loadGroups();
+    });
+
+    // Theme
+    if (window.photon.theme === 'light') document.documentElement.classList.add('light');
+    window.photon.onThemeChange(theme => {
+      document.documentElement.classList.toggle('light', theme === 'light');
+    });
+
+    // Init
+    connectChannel();
+
+    // Poll for new messages every 3s (agent responses come async)
+    setInterval(() => { if (state.selected) loadMessages(); }, 3000);
+  }
+</script>
+</body>
+</html>
