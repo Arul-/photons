@@ -822,12 +822,8 @@ export default class Claw extends Photon {
     const sessionKey = `${config.agent}:${primaryFolder}`;
     const sessionId = this.sessionMap[sessionKey] ?? (config.agent === 'claude' ? this.sessionMap[primaryFolder] : undefined);
 
-    // Build memory-augmented system prompt for scheduled runs
-    let systemPrompt = config.systemPrompt || '';
-    const memoryCtx = await this._buildMemoryPrompt(groupName);
-    if (memoryCtx) {
-      systemPrompt = systemPrompt ? `${systemPrompt}\n\n${memoryCtx}` : memoryCtx;
-    }
+    // Build full system prompt (persona + memory + journal)
+    const systemPrompt = await this._buildSystemPrompt(groupName, config);
 
     const result = await this.router.run({
       groupFolder: primaryFolder,
@@ -844,9 +840,10 @@ export default class Claw extends Photon {
     }
 
     if (result.status === 'success' && result.output) {
-      // Append scheduled run to conversation log
-      this._appendConversation(groupName, `[Scheduled] ${prompt}`, result.output, 'System').catch(() => {});
-      await this._sendAgentResponse(groupName, config, result.output, primaryFolder, result.duration);
+      // Extract journal entries and clean output
+      const cleanOutput = await this._processJournal(groupName, result.output, `[Scheduled] ${prompt}`, 'System');
+      this._appendConversation(groupName, `[Scheduled] ${prompt}`, cleanOutput, 'System').catch(() => {});
+      await this._sendAgentResponse(groupName, config, cleanOutput, primaryFolder, result.duration);
     }
   }
 
@@ -1131,12 +1128,8 @@ export default class Claw extends Photon {
     const sessionKey = `${config.agent}:${primaryFolder}`;
     const sessionId = this.sessionMap[sessionKey] ?? (config.agent === 'claude' ? this.sessionMap[primaryFolder] : undefined);
 
-    let systemPrompt = config.systemPrompt || '';
     this._ensureAgentDir(name);
-    const memoryCtx = await this._buildMemoryPrompt(name);
-    if (memoryCtx) {
-      systemPrompt = systemPrompt ? `${systemPrompt}\n\n${memoryCtx}` : memoryCtx;
-    }
+    const systemPrompt = await this._buildSystemPrompt(name, config);
 
     let result: any;
     try {
@@ -1159,8 +1152,9 @@ export default class Claw extends Photon {
 
     if (result.status === 'success' && result.output) {
       const batchSummary = batch.map(e => e.message?.content || '').join(' | ').slice(0, 200);
-      this._appendConversation(name, `[Batch x${batch.length}] ${batchSummary}`, result.output, 'Batch').catch(() => {});
-      await this._sendAgentResponse(name, config, result.output, primaryFolder, result.duration);
+      const cleanOutput = await this._processJournal(name, result.output, `[Batch x${batch.length}] ${batchSummary}`, 'Batch');
+      this._appendConversation(name, `[Batch x${batch.length}] ${batchSummary}`, cleanOutput, 'Batch').catch(() => {});
+      await this._sendAgentResponse(name, config, cleanOutput, primaryFolder, result.duration);
     } else if (result.error) {
       this.emit({ type: 'error', source: 'agent-runner', group: name, error: result.error });
     }
@@ -1399,13 +1393,9 @@ export default class Claw extends Photon {
     const sessionKey = `${config.agent}:${primaryFolder}`;
     const sessionId = this.sessionMap[sessionKey] ?? (config.agent === 'claude' ? this.sessionMap[primaryFolder] : undefined);
 
-    // Build memory-augmented system prompt
-    let systemPrompt = config.systemPrompt || '';
+    // Build full system prompt (persona + memory + journal)
     this._ensureAgentDir(name);
-    const memoryCtx = await this._buildMemoryPrompt(name);
-    if (memoryCtx) {
-      systemPrompt = systemPrompt ? `${systemPrompt}\n\n${memoryCtx}` : memoryCtx;
-    }
+    const systemPrompt = await this._buildSystemPrompt(name, config);
 
     let result: any;
     try {
@@ -1429,11 +1419,12 @@ export default class Claw extends Photon {
     }
 
     if (result.status === 'success' && result.output) {
-      // Append conversation round-trip to memory (non-blocking)
-      this._appendConversation(name, msg.content, result.output, msg.senderName).catch((err) => {
+      // Extract journal entries and clean output before sending
+      const cleanOutput = await this._processJournal(name, result.output, msg.content, msg.senderName);
+      this._appendConversation(name, msg.content, cleanOutput, msg.senderName).catch((err) => {
         this.emit({ type: 'memory_error', group: name, error: err.message });
       });
-      await this._sendAgentResponse(name, config, result.output, primaryFolder, result.duration, ackKey, ackMessageId);
+      await this._sendAgentResponse(name, config, cleanOutput, primaryFolder, result.duration, ackKey, ackMessageId);
     } else if (result.error) {
       this.emit({ type: 'error', source: 'agent-runner', group: name, error: result.error });
     }
@@ -1551,6 +1542,89 @@ export default class Claw extends Photon {
 
   private _esc(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  /** Build full system prompt: persona + memory + journal instruction */
+  private async _buildSystemPrompt(groupName: string, config: GroupConfig): Promise<string> {
+    // Start with persona (from persona.md if it exists, falling back to config.systemPrompt)
+    let persona = config.systemPrompt || '';
+    const personaPath = path.join(this._agentDir(groupName), 'persona.md');
+    try {
+      const personaContent = await fs.promises.readFile(personaPath, 'utf-8');
+      // Strip the markdown title, use the body
+      const body = personaContent.replace(/^#\s+.*\n+/, '').trim();
+      if (body) persona = body;
+    } catch { /* use config.systemPrompt fallback */ }
+
+    const parts = [persona];
+
+    // Append memory context
+    const memoryCtx = await this._buildMemoryPrompt(groupName);
+    if (memoryCtx) parts.push(memoryCtx);
+
+    // Append journal instruction
+    parts.push(this._journalInstruction());
+
+    return parts.filter(p => p).join('\n\n');
+  }
+
+  // ─── Journal System ────────────────────────────────────────────
+
+  /** Build the journal instruction appended to the system prompt */
+  private _journalInstruction(): string {
+    return `
+<journal-instruction>
+Before responding, reflect briefly on the interaction. Wrap your inner thoughts in <journal> tags — these will be stripped from the visible response and saved privately. Use this to note:
+- What the user seems to need (beyond what they literally asked)
+- How you adapted your tone or approach and why
+- Anything you couldn't do but wish you could (skill gaps)
+- Signals about user satisfaction (corrections, frustration, praise)
+- Information worth remembering for future conversations
+
+Example: <journal>User asked for publisher recommendations — they have regional popularity in Tamil Nadu but want global reach. They rejected self-publishing, preferring traditional publishers with marketing muscle. I should remember this preference.</journal>
+
+Keep journal entries concise (1-3 sentences). Not every response needs one — only write when there's something worth noting.
+</journal-instruction>`;
+  }
+
+  /** Extract <journal> entries from agent output, save to daily JSONL, return cleaned output */
+  private async _processJournal(groupName: string, rawOutput: string, userMessage: string, senderName: string): Promise<string> {
+    const journalPattern = /<journal>([\s\S]*?)<\/journal>/g;
+    const entries: string[] = [];
+    let match: RegExpExecArray | null;
+
+    while ((match = journalPattern.exec(rawOutput)) !== null) {
+      const content = match[1].trim();
+      if (content) entries.push(content);
+    }
+
+    // Strip journal tags from visible output
+    const cleanOutput = rawOutput.replace(journalPattern, '').replace(/\n{3,}/g, '\n\n').trim();
+
+    // Persist journal entries
+    if (entries.length > 0) {
+      const agentDir = this._agentDir(groupName);
+      const journalDir = path.join(agentDir, 'journal');
+      fs.mkdirSync(journalDir, { recursive: true });
+
+      const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+      const journalPath = path.join(journalDir, `${today}.jsonl`);
+      const timestamp = new Date().toISOString();
+
+      for (const content of entries) {
+        const entry = JSON.stringify({
+          timestamp,
+          sender: senderName,
+          userMessage: userMessage.slice(0, 200),
+          thought: content,
+        }) + '\n';
+        await fs.promises.appendFile(journalPath, entry);
+      }
+
+      this.emit({ type: 'journal_entry', group: groupName, count: entries.length });
+    }
+
+    return cleanOutput;
   }
 
   // ─── Memory System ──────────────────────────────────────────────
