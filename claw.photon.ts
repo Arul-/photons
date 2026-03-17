@@ -19,6 +19,7 @@ import { Photon } from '@portel/photon-core';
  * @photon telegram telegram
  * @photon router agent-router
  * @photon courier courier
+ * @photon mentor ./mentor.photon.ts
  * @ui dashboard ./ui/dashboard.html
  */
 export default class Claw extends Photon {
@@ -46,6 +47,7 @@ export default class Claw extends Photon {
     private telegram: any,
     private router: any,
     private courier: any,
+    private mentor: any,
   ) {
     super();
   }
@@ -1558,6 +1560,10 @@ export default class Claw extends Photon {
 
     const parts = [persona];
 
+    // Append skills context
+    const skillsCtx = await this._buildSkillsPrompt(groupName);
+    if (skillsCtx) parts.push(skillsCtx);
+
     // Append memory context
     const memoryCtx = await this._buildMemoryPrompt(groupName);
     if (memoryCtx) parts.push(memoryCtx);
@@ -1566,6 +1572,21 @@ export default class Claw extends Photon {
     parts.push(this._journalInstruction());
 
     return parts.filter(p => p).join('\n\n');
+  }
+
+  /** Read skills.json and format as a skills block for the system prompt */
+  private async _buildSkillsPrompt(groupName: string): Promise<string> {
+    const skillsPath = path.join(this._agentDir(groupName), 'skills.json');
+    try {
+      const raw = await fs.promises.readFile(skillsPath, 'utf-8');
+      const skills: AgentSkill[] = JSON.parse(raw);
+      if (!skills.length) return '';
+
+      const lines = skills.map(s => `- **${s.name}**: ${s.description}${s.photon ? ` (via \`${s.photon}\`)` : ''}`);
+      return `<skills>\nYou have access to these skills:\n${lines.join('\n')}\n\nWhen a user's request matches a skill, use it. If you can't fulfill a request and think a skill would help, note the gap in your journal.\n</skills>`;
+    } catch {
+      return ''; // no skills.json yet
+    }
   }
 
   // ─── Journal System ────────────────────────────────────────────
@@ -1716,6 +1737,12 @@ Keep journal entries concise (1-3 sentences). Not every response needs one — o
       fs.writeFileSync(convPath, '# Conversation History\n\n');
     }
 
+    // Seed skills.json if it doesn't exist
+    const skillsPath = path.join(agentDir, 'skills.json');
+    if (!fs.existsSync(skillsPath)) {
+      fs.writeFileSync(skillsPath, '[]');
+    }
+
     // Seed persona.md if it doesn't exist
     const personaPath = path.join(agentDir, 'persona.md');
     if (!fs.existsSync(personaPath)) {
@@ -1763,6 +1790,22 @@ Keep journal entries concise (1-3 sentences). Not every response needs one — o
     }) + '\n';
     await fs.promises.appendFile(logPath, logEntry);
 
+    // Conversation count threshold trigger — auto-compact when exceeded
+    this._checkConversationThreshold(groupName).catch(() => {});
+  }
+
+  /** Fire mentor compact when conversation count exceeds threshold */
+  private async _checkConversationThreshold(groupName: string): Promise<void> {
+    const convPath = path.join(this._memoryDir(groupName), 'conversation.md');
+    try {
+      const content = await fs.promises.readFile(convPath, 'utf-8');
+      const count = content.split(/^## /m).filter(s => s.trim()).length - 1;
+      const threshold = this.settings.maxConversations * 2; // compact at 2x the trim limit
+      if (count >= threshold) {
+        this.emit({ type: 'threshold_compact', group: groupName, count, threshold });
+        await this.mentor.compact({ agent: groupName });
+      }
+    } catch { /* no conversation file yet */ }
   }
 
   /** Keep only the last maxConversations entries in conversation.md (called after compaction) */
@@ -1979,6 +2022,66 @@ Respond in EXACTLY this format (include all three sections even if empty):
     return { archived, sessionReset: true };
   }
 
+  /**
+   * View or manage skills for an agent group.
+   *
+   * @title Agent Skills
+   * @param group Group name (partial match) {@example "Arul and Lura"}
+   * @param action Action to perform {@choice list|add|remove}
+   * @param skill Skill name (for add/remove)
+   * @param description Skill description (for add)
+   * @param photon Photon backing this skill (for add, optional)
+   */
+  async skills(params: {
+    group: string;
+    action?: 'list' | 'add' | 'remove';
+    skill?: string;
+    description?: string;
+    photon?: string;
+  }): Promise<AgentSkill[] | { added: string } | { removed: string }> {
+    const query = params.group.toLowerCase();
+    const name = Object.keys(this.registry).find(k => k.toLowerCase().includes(query));
+    if (!name) throw new Error(`No registered group matching "${params.group}"`);
+
+    const skillsPath = path.join(this._agentDir(name), 'skills.json');
+    let skills: AgentSkill[] = [];
+    try { skills = JSON.parse(await fs.promises.readFile(skillsPath, 'utf-8')); } catch { /* empty */ }
+
+    const action = params.action || 'list';
+
+    if (action === 'list') return skills;
+
+    if (action === 'add') {
+      if (!params.skill) throw new Error('Skill name required');
+      if (skills.some(s => s.name === params.skill)) throw new Error(`Skill "${params.skill}" already exists`);
+      const newSkill: AgentSkill = {
+        name: params.skill,
+        description: params.description || params.skill,
+        source: 'local',
+        addedAt: new Date().toISOString(),
+        ...(params.photon ? { photon: params.photon } : {}),
+      };
+      skills.push(newSkill);
+      await fs.promises.writeFile(skillsPath, JSON.stringify(skills, null, 2));
+      this._gitCommit(name, `skill: add ${params.skill}`);
+      this.emit({ type: 'skill_added', group: name, skill: params.skill });
+      return { added: params.skill };
+    }
+
+    if (action === 'remove') {
+      if (!params.skill) throw new Error('Skill name required');
+      const idx = skills.findIndex(s => s.name === params.skill);
+      if (idx === -1) throw new Error(`Skill "${params.skill}" not found`);
+      skills.splice(idx, 1);
+      await fs.promises.writeFile(skillsPath, JSON.stringify(skills, null, 2));
+      this._gitCommit(name, `skill: remove ${params.skill}`);
+      this.emit({ type: 'skill_removed', group: name, skill: params.skill });
+      return { removed: params.skill };
+    }
+
+    throw new Error(`Unknown action: ${action}`);
+  }
+
   /** Schedule memory compaction for all memory-enabled groups */
   private async _scheduleCompaction(): Promise<void> {
     const taskName = 'memory-compact-all';
@@ -1993,13 +2096,18 @@ Respond in EXACTLY this format (include all three sections even if empty):
     });
   }
 
-  /** Internal: compact all memory-enabled groups (called by scheduler) */
+  /** Internal: run nightly mentor review + compact for all groups (called by scheduler) */
   async _compactAll(): Promise<void> {
     for (const [name] of Object.entries(this.registry)) {
       try {
-        await this.compact({ group: name });
+        // Full mentor review (journal analysis + persona evolution + compaction)
+        await this.mentor.review({ agent: name });
       } catch (err: any) {
-        this.emit({ type: 'compact_error', group: name, error: err.message });
+        this.emit({ type: 'mentor_error', group: name, error: err.message });
+        // Fall back to compact-only if review fails
+        try {
+          await this.mentor.compact({ agent: name });
+        } catch { /* already emitted error */ }
       }
     }
   }
@@ -2036,4 +2144,12 @@ interface QueueItem {
   config: GroupConfig;
   event?: any;       // single message from direct channel subscription
   batch?: any[];     // batch of messages from courier scheduled delivery
+}
+
+interface AgentSkill {
+  name: string;
+  description: string;
+  photon?: string;      // photon name if skill is backed by a photon
+  source: 'local' | 'marketplace';
+  addedAt: string;
 }
