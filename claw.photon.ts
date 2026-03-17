@@ -100,15 +100,19 @@ export default class Claw extends Photon {
     const saved = await this.memory.get<Record<string, GroupConfig>>('registry');
     if (saved) {
       // Migrate: existing entries without channel default to 'whatsapp'
+      // Migrate: folders must be string[] (bug: some entries had plain string)
       for (const config of Object.values(saved)) {
         if (!config.channel) config.channel = 'whatsapp';
+        if (typeof config.folders === 'string') config.folders = [config.folders];
       }
       this.registry = saved;
+
+      // Migrate: move memory from ~/Projects/{folder}/memory/ to ~/.photon/data/claw/agents/{name}/memory/
+      this._migrateMemoryDirs();
     }
 
     const savedSessions = await this.memory.get<Record<string, string>>('sessionMap');
     if (savedSessions) this.sessionMap = savedSessions;
-
 
     // Schedule memory compaction
     if (Object.keys(this.registry).length > 0) {
@@ -820,7 +824,7 @@ export default class Claw extends Photon {
 
     // Build memory-augmented system prompt for scheduled runs
     let systemPrompt = config.systemPrompt || '';
-    const memoryCtx = await this._buildMemoryPrompt(primaryFolder);
+    const memoryCtx = await this._buildMemoryPrompt(groupName);
     if (memoryCtx) {
       systemPrompt = systemPrompt ? `${systemPrompt}\n\n${memoryCtx}` : memoryCtx;
     }
@@ -841,7 +845,7 @@ export default class Claw extends Photon {
 
     if (result.status === 'success' && result.output) {
       // Append scheduled run to conversation log
-      this._appendConversation(primaryFolder, `[Scheduled] ${prompt}`, result.output, 'System').catch(() => {});
+      this._appendConversation(groupName, `[Scheduled] ${prompt}`, result.output, 'System').catch(() => {});
       await this._sendAgentResponse(groupName, config, result.output, primaryFolder, result.duration);
     }
   }
@@ -1128,8 +1132,8 @@ export default class Claw extends Photon {
     const sessionId = this.sessionMap[sessionKey] ?? (config.agent === 'claude' ? this.sessionMap[primaryFolder] : undefined);
 
     let systemPrompt = config.systemPrompt || '';
-    this._ensureMemoryDir(primaryFolder);
-    const memoryCtx = await this._buildMemoryPrompt(primaryFolder);
+    this._ensureAgentDir(name);
+    const memoryCtx = await this._buildMemoryPrompt(name);
     if (memoryCtx) {
       systemPrompt = systemPrompt ? `${systemPrompt}\n\n${memoryCtx}` : memoryCtx;
     }
@@ -1155,7 +1159,7 @@ export default class Claw extends Photon {
 
     if (result.status === 'success' && result.output) {
       const batchSummary = batch.map(e => e.message?.content || '').join(' | ').slice(0, 200);
-      this._appendConversation(primaryFolder, `[Batch x${batch.length}] ${batchSummary}`, result.output, 'Batch').catch(() => {});
+      this._appendConversation(name, `[Batch x${batch.length}] ${batchSummary}`, result.output, 'Batch').catch(() => {});
       await this._sendAgentResponse(name, config, result.output, primaryFolder, result.duration);
     } else if (result.error) {
       this.emit({ type: 'error', source: 'agent-runner', group: name, error: result.error });
@@ -1397,8 +1401,8 @@ export default class Claw extends Photon {
 
     // Build memory-augmented system prompt
     let systemPrompt = config.systemPrompt || '';
-    this._ensureMemoryDir(primaryFolder);
-    const memoryCtx = await this._buildMemoryPrompt(primaryFolder);
+    this._ensureAgentDir(name);
+    const memoryCtx = await this._buildMemoryPrompt(name);
     if (memoryCtx) {
       systemPrompt = systemPrompt ? `${systemPrompt}\n\n${memoryCtx}` : memoryCtx;
     }
@@ -1426,7 +1430,7 @@ export default class Claw extends Photon {
 
     if (result.status === 'success' && result.output) {
       // Append conversation round-trip to memory (non-blocking)
-      this._appendConversation(primaryFolder, msg.content, result.output, msg.senderName).catch((err) => {
+      this._appendConversation(name, msg.content, result.output, msg.senderName).catch((err) => {
         this.emit({ type: 'memory_error', group: name, error: err.message });
       });
       await this._sendAgentResponse(name, config, result.output, primaryFolder, result.duration, ackKey, ackMessageId);
@@ -1551,21 +1555,81 @@ export default class Claw extends Photon {
 
   // ─── Memory System ──────────────────────────────────────────────
 
-  /** Get the memory directory path for a group folder */
-  private _memoryDir(groupFolder: string): string {
-    // Memory lives inside the group's working directory
-    const baseDir = path.join(process.env.HOME || '', 'Projects');
-    return path.join(baseDir, groupFolder, 'memory');
+  /** Git add + commit in an agent's data directory. Silently skips on failure. */
+  private _gitCommit(groupName: string, message: string): void {
+    try {
+      const { execFileSync } = require('child_process');
+      const agentDir = this._agentDir(groupName);
+      if (!fs.existsSync(path.join(agentDir, '.git'))) return;
+      execFileSync('git', ['add', '-A'], { cwd: agentDir, stdio: 'ignore' });
+      execFileSync('git', ['commit', '-m', message], { cwd: agentDir, stdio: 'ignore' });
+    } catch { /* nothing to commit or git unavailable */ }
   }
 
-  /** Ensure memory directory and seed empty bucket files */
-  private _ensureMemoryDir(groupFolder: string): string {
-    const dir = this._memoryDir(groupFolder);
-    fs.mkdirSync(dir, { recursive: true });
+  /** One-time migration: move memory from ~/Projects/{folder}/memory/ to new agent dirs */
+  private _migrateMemoryDirs(): void {
+    const home = process.env.HOME || '';
+    const migrated = new Set<string>();
 
+    for (const [name, config] of Object.entries(this.registry)) {
+      const primaryFolder = config.folders[0];
+      if (!primaryFolder || migrated.has(name)) continue;
+
+      const oldDir = path.join(home, 'Projects', primaryFolder, 'memory');
+      const newDir = this._memoryDir(name);
+
+      // Skip if old dir doesn't exist or new dir already has data
+      if (!fs.existsSync(oldDir)) continue;
+      if (fs.existsSync(path.join(newDir, 'log.jsonl'))) continue;
+
+      // Ensure new directory structure
+      this._ensureAgentDir(name);
+
+      // Copy memory files
+      const filesToMigrate = ['conversation.md', 'log.jsonl', 'decisions.md', 'preferences.md', 'rules.md'];
+      for (const file of filesToMigrate) {
+        const src = path.join(oldDir, file);
+        const dst = path.join(newDir, file);
+        if (fs.existsSync(src)) {
+          try {
+            fs.copyFileSync(src, dst);
+          } catch { /* skip on error */ }
+        }
+      }
+
+      // Git commit the migrated data
+      this._gitCommit(name, `migrate: imported memory from ~/Projects/${primaryFolder}/memory/`);
+
+      migrated.add(name);
+      this.emit({ type: 'memory_migrated', group: name, from: oldDir, to: newDir });
+    }
+  }
+
+  /** Get the agent data directory for a group (keyed by group name, not folder) */
+  private _agentDir(groupName: string): string {
+    // Agent data lives in ~/.photon/data/claw/agents/{safeName}/
+    const safeName = groupName.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase();
+    const home = process.env.HOME || '';
+    return path.join(home, '.photon', 'data', 'claw', 'agents', safeName);
+  }
+
+  /** Get the memory subdirectory for a group */
+  private _memoryDir(groupName: string): string {
+    return path.join(this._agentDir(groupName), 'memory');
+  }
+
+  /** Ensure agent data directory with memory, journal, and proposals subdirs */
+  private _ensureAgentDir(groupName: string): string {
+    const agentDir = this._agentDir(groupName);
+    const memoryDir = path.join(agentDir, 'memory');
+    fs.mkdirSync(memoryDir, { recursive: true });
+    fs.mkdirSync(path.join(agentDir, 'journal'), { recursive: true });
+    fs.mkdirSync(path.join(agentDir, 'proposals'), { recursive: true });
+
+    // Seed memory bucket files
     const buckets = ['decisions.md', 'preferences.md', 'rules.md'];
     for (const bucket of buckets) {
-      const filePath = path.join(dir, bucket);
+      const filePath = path.join(memoryDir, bucket);
       if (!fs.existsSync(filePath)) {
         const title = bucket.replace('.md', '');
         fs.writeFileSync(filePath, `# ${title.charAt(0).toUpperCase() + title.slice(1)}\n\n`);
@@ -1573,22 +1637,40 @@ export default class Claw extends Photon {
     }
 
     // Ensure conversation.md exists
-    const convPath = path.join(dir, 'conversation.md');
+    const convPath = path.join(memoryDir, 'conversation.md');
     if (!fs.existsSync(convPath)) {
       fs.writeFileSync(convPath, '# Conversation History\n\n');
     }
 
-    return dir;
+    // Seed persona.md if it doesn't exist
+    const personaPath = path.join(agentDir, 'persona.md');
+    if (!fs.existsSync(personaPath)) {
+      const config = this.registry[groupName];
+      const initialPersona = config?.systemPrompt || `You are an assistant for the group "${groupName}".`;
+      fs.writeFileSync(personaPath, `# Persona\n\n${initialPersona}\n`);
+    }
+
+    // Init git repo if not already
+    const gitDir = path.join(agentDir, '.git');
+    if (!fs.existsSync(gitDir)) {
+      try {
+        const { execFileSync } = require('child_process');
+        execFileSync('git', ['init'], { cwd: agentDir, stdio: 'ignore' });
+      } catch { /* git not available */ }
+      this._gitCommit(groupName, 'init: agent data directory');
+    }
+
+    return memoryDir;
   }
 
   /** Append a completed round-trip (user query + agent response) to conversation.md and log.jsonl */
   private async _appendConversation(
-    groupFolder: string,
+    groupName: string,
     userMessage: string,
     agentResponse: string,
     senderName: string,
   ): Promise<void> {
-    const dir = this._ensureMemoryDir(groupFolder);
+    const dir = this._ensureAgentDir(groupName);
     const timestamp = new Date().toISOString();
     const dateStr = new Date().toLocaleString();
 
@@ -1624,8 +1706,8 @@ export default class Claw extends Photon {
   }
 
   /** Read memory files and build a memory context block for the agent */
-  private async _buildMemoryPrompt(groupFolder: string): Promise<string> {
-    const dir = this._memoryDir(groupFolder);
+  private async _buildMemoryPrompt(groupName: string): Promise<string> {
+    const dir = this._memoryDir(groupName);
     if (!fs.existsSync(dir)) return '';
 
     const parts: string[] = [];
@@ -1672,8 +1754,7 @@ export default class Claw extends Photon {
     if (!name) throw new Error(`No registered group matching "${params.group}"`);
 
     const config = this.registry[name];
-    const primaryFolder = config.folders[0];
-    const dir = this._memoryDir(primaryFolder);
+    const dir = this._memoryDir(name);
 
     if (!fs.existsSync(dir)) {
       return { compacted: 0, decisions: 0, preferences: 0, rules: 0 };
@@ -1771,9 +1852,57 @@ Respond in EXACTLY this format (include all three sections even if empty):
     await this._trimConversations(convPath);
 
     const total = counts.decisions + counts.preferences + counts.rules;
-    this.emit({ type: 'compacted', group: name, folder: primaryFolder, ...counts, total });
+    this.emit({ type: 'compacted', group: name, ...counts, total });
 
     return { compacted: total, ...counts };
+  }
+
+  /**
+   * Start a new session — archives current conversation and resets context.
+   * Memory (decisions, preferences, rules) persists. Only the conversational
+   * thread resets, like closing a chapter.
+   *
+   * @title New Session
+   * @param group Group name (partial match) {@example "Arul and Lura"}
+   */
+  async reset(params: { group: string }): Promise<{ archived: number; sessionReset: boolean }> {
+    const query = params.group.toLowerCase();
+    const name = Object.keys(this.registry).find(k => k.toLowerCase().includes(query));
+    if (!name) throw new Error(`No registered group matching "${params.group}"`);
+
+    const config = this.registry[name];
+    const dir = this._memoryDir(name);
+
+    if (!fs.existsSync(dir)) {
+      return { archived: 0, sessionReset: false };
+    }
+
+    // Count current conversations before clearing
+    const convPath = path.join(dir, 'conversation.md');
+    let archived = 0;
+    try {
+      const content = await fs.promises.readFile(convPath, 'utf-8');
+      archived = content.split(/^## /m).filter(s => s.trim()).length - 1; // subtract title section
+      if (archived < 0) archived = 0;
+    } catch { /* no file */ }
+
+    // Clear conversation.md (log.jsonl preserves full history)
+    await fs.promises.writeFile(convPath, '# Conversation History\n\n');
+
+    // Reset session ID so agent starts fresh
+    const primaryFolder = config.folders[0];
+    const sessionKey = `${config.agent}:${primaryFolder}`;
+    delete this.sessionMap[sessionKey];
+    // Also clear legacy key format
+    delete this.sessionMap[primaryFolder];
+    await this.memory.set('sessionMap', this.sessionMap);
+
+    // Git commit the session reset
+    this._gitCommit(name, `session: new session - archived ${archived} conversations`);
+
+    this.emit({ type: 'new_session', group: name, archived });
+
+    return { archived, sessionReset: true };
   }
 
   /** Schedule memory compaction for all memory-enabled groups */
