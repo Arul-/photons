@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="mcp:ui-size" content="minWidth=900;minHeight=600;maxHeight=1000">
+    <title>Mesh Marketplace</title>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --border: #30363d;
+            --text-primary: #c9d1d9;
+            --text-secondary: #8b949e;
+            --accent: #a371f7;
+            --success: #3fb950;
+            --radius: 16px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            overflow-y: auto;
+        }
+
+        .header {
+            width: 100%;
+            max-width: 1000px;
+            text-align: center;
+            margin-bottom: 60px;
+        }
+
+        .header h1 { font-size: 32px; font-weight: 800; color: #fff; margin-bottom: 12px; }
+        .header p { font-size: 16px; color: var(--text-secondary); max-width: 600px; margin: 0 auto; }
+
+        /* Grid */
+        .marketplace-grid {
+            width: 100%;
+            max-width: 1000px;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 32px;
+        }
+
+        .photon-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .photon-card:hover { transform: translateY(-8px); border-color: var(--accent); box-shadow: 0 20px 40px rgba(0,0,0,0.4); }
+
+        .photon-icon {
+            width: 56px;
+            height: 56px;
+            background: var(--bg-primary);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+        }
+
+        .photon-name { font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+        .photon-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 20px; flex: 1; }
+
+        .tag-list { display: flex; gap: 6px; margin-bottom: 24px; }
+        .tag { font-size: 10px; text-transform: uppercase; font-weight: 800; color: var(--accent); background: rgba(163, 113, 247, 0.1); padding: 2px 8px; border-radius: 4px; }
+
+        .btn-install {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 10px;
+            font-weight: 700;
+            cursor: pointer;
+            width: 100%;
+            transition: all 0.2s;
+        }
+
+        .btn-install:hover { opacity: 0.9; transform: scale(1.02); }
+        .btn-install.installed { background: var(--success); cursor: default; }
+        .btn-install.installed:hover { transform: none; opacity: 1; }
+
+        .installed-check { display: none; }
+        .installed .installed-check { display: inline; }
+
+        /* Search */
+        .search-container {
+            width: 100%;
+            max-width: 500px;
+            margin-bottom: 40px;
+            position: relative;
+        }
+
+        .search-input {
+            width: 100%;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 30px;
+            padding: 12px 24px;
+            color: white;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .search-input:focus { border-color: var(--accent); }
+
+        .loading-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            backdrop-filter: blur(4px);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>Mesh Marketplace</h1>
+        <p>Discover specialized photons to expand your P2P ecosystem. All photons run locally and collaborate via the Work Mesh.</p>
+    </div>
+
+    <div class="search-container">
+        <input type="text" class="search-input" placeholder="Search by name, tag, or function..." id="searchBox">
+    </div>
+
+    <div class="marketplace-grid" id="grid">
+        <!-- Cards appear here -->
+    </div>
+
+    <div class="loading-overlay" id="loader">
+        <div style="font-size: 20px; font-weight: 700; color: #fff;">Installing Photon...</div>
+    </div>
+
+    <script>
+        class MarketplaceApp {
+            constructor() {
+                this.catalog = [];
+                this.installed = [];
+                this._retries = 0;
+                this.init();
+            }
+
+            async init() {
+                if (!window.photon) { if (this._retries++ < 50) setTimeout(() => this.init(), 100); return; }
+                
+                const data = await window.photon.callTool('main', {});
+                this.catalog = data.catalog;
+                this.installed = data.installed;
+                
+                this.render();
+
+                document.getElementById('searchBox').oninput = (e) => this.filter(e.target.value);
+            }
+
+            render(items = this.catalog) {
+                const grid = document.getElementById('grid');
+                grid.innerHTML = items.map(p => {
+                    const isInstalled = this.installed.includes(p.id);
+                    return `
+                        <div class="photon-card">
+                            <div class="photon-icon">${p.icon}</div>
+                            <div class="photon-name">${p.name}</div>
+                            <div class="photon-desc">${p.description}</div>
+                            <div class="tag-list">
+                                ${p.tags.map(t => `<span class="tag">${t}</span>`).join('')}
+                            </div>
+                            <button class="btn-install ${isInstalled ? 'installed' : ''}" onclick="app.install('${p.id}')">
+                                ${isInstalled ? '✓ Installed' : 'Install Photon'}
+                            </button>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            filter(query) {
+                const q = query.toLowerCase();
+                const filtered = this.catalog.filter(p => 
+                    p.name.toLowerCase().includes(q) || 
+                    p.description.toLowerCase().includes(q) ||
+                    p.tags.some(t => t.toLowerCase().includes(q))
+                );
+                this.render(filtered);
+            }
+
+            async install(id) {
+                if (this.installed.includes(id)) return;
+
+                const loader = document.getElementById('loader');
+                loader.style.display = 'flex';
+
+                try {
+                    const res = await window.photon.callTool('install', { id });
+                    if (res.success) {
+                        this.installed.push(id);
+                        this.render();
+                    }
+                } catch (e) {
+                    alert(e.message);
+                } finally {
+                    loader.style.display = 'none';
+                }
+            }
+        }
+
+        const app = new MarketplaceApp();
+    </script>
+</body>
+</html>

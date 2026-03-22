@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="mcp:ui-size" content="minWidth=800;minHeight=600;maxHeight=900">
+    <title>Mesh Learning Bridge</title>
+    <style>
+        :root {
+            --bg-primary: var(--color-background, #0d1117);
+            --bg-secondary: var(--color-background-soft, #161b22);
+            --border: var(--color-border, #30363d);
+            --text-primary: var(--color-text, #c9d1d9);
+            --text-secondary: var(--color-text-muted, #8b949e);
+            --accent: var(--color-primary, #58a6ff);
+            --radius: 12px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Sidebar: Knowledge Stats */
+        .sidebar {
+            width: 300px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            padding: 24px;
+        }
+
+        .stat-card {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 24px;
+            text-align: center;
+        }
+
+        .stat-value { font-size: 32px; font-weight: 800; color: var(--accent); }
+        .stat-label { font-size: 10px; text-transform: uppercase; color: var(--text-secondary); margin-top: 4px; }
+
+        .topic-item {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        /* Main: Learning Feed */
+        .main {
+            flex: 1;
+            padding: 40px;
+            overflow-y: auto;
+        }
+
+        .insight-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 24px;
+            margin-bottom: 24px;
+            position: relative;
+            transition: border-color 0.2s;
+        }
+
+        .insight-card:hover { border-color: var(--accent); }
+
+        .insight-topic {
+            font-size: 10px;
+            text-transform: uppercase;
+            font-weight: 800;
+            color: var(--accent);
+            background: rgba(88, 166, 255, 0.1);
+            padding: 4px 8px;
+            border-radius: 4px;
+            display: inline-block;
+            margin-bottom: 12px;
+        }
+
+        .insight-text {
+            font-size: 16px;
+            line-height: 1.6;
+            color: #fff;
+            margin-bottom: 16px;
+        }
+
+        .insight-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        .tag-list { display: flex; gap: 6px; }
+        .tag { background: var(--bg-primary); border: 1px solid var(--border); padding: 2px 6px; border-radius: 4px; }
+
+        .confidence-meter {
+            height: 4px;
+            background: var(--bg-primary);
+            border-radius: 2px;
+            width: 100px;
+            overflow: hidden;
+            margin-top: 4px;
+        }
+        .confidence-fill { height: 100%; background: var(--accent); }
+
+        .empty-state {
+            text-align: center;
+            padding: 100px 0;
+            color: var(--text-secondary);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="stat-card">
+            <div class="stat-value" id="totalLearnings">0</div>
+            <div class="stat-label">Total Learnings</div>
+        </div>
+
+        <div style="font-size: 12px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 12px;">Top Knowledge Areas</div>
+        <div id="topicList">
+            <!-- Populated by script -->
+        </div>
+    </div>
+
+    <div class="main">
+        <h1 style="font-size: 24px; margin-bottom: 8px;">Learning Feed</h1>
+        <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 32px;">Autonomous semantic insights extracted by agents from P2P missions.</p>
+
+        <div id="insightList">
+            <!-- Insights appear here -->
+        </div>
+
+        <div id="emptyState" class="empty-state" style="display: none;">
+            <div style="font-size: 48px; margin-bottom: 16px;">🎓</div>
+            <p>Your agents haven't extracted any knowledge yet. Complete missions to build your local brain.</p>
+        </div>
+    </div>
+
+    <script>
+        class LearningBridgeApp {
+            constructor() {
+                this.init();
+            }
+
+            parseMCP(raw) {
+                if (raw && raw.content && Array.isArray(raw.content)) {
+                    const item = raw.content.find(c => c.type === 'text' && c.text);
+                    if (item) {
+                        try { return JSON.parse(item.text); } catch (e) { return item.text; }
+                    }
+                }
+                return raw;
+            }
+
+            async init() {
+                if (!window.photon) {
+                    console.warn('MCP bridge not found. Using demo data.');
+                    window.photon = {
+                        callTool: async (name) => {
+                            if (name === 'main') return { 
+                                stats: { totalLearnings: 5, topTopics: [{name: 'React', count: 3}, {name: 'P2P', count: 2}] },
+                                insights: [{id: 'i1', topic: 'Architecture', learning: 'P2P networks scale better with DHT.', confidence: 0.95, tags: ['p2p', 'dht'], timestamp: new Date().toISOString()}] 
+                            };
+                            return {};
+                        },
+                        onEmit: () => {},
+                        onResult: () => {}
+                    };
+                }
+
+                // Handle real-time results and emissions
+                window.photon.onResult((result) => {
+                    const data = this.parseMCP(result);
+                    if (data && data.insights) this.render(data);
+                });
+
+                window.photon.onEmit((event) => {
+                    if (event && event.type === 'update') {
+                        window.photon.callTool('main', {}).then(raw => this.render(this.parseMCP(raw)));
+                    }
+                });
+
+                try {
+                    const raw = await window.photon.callTool('main', {});
+                    this.render(this.parseMCP(raw));
+                } catch(e) {
+                    console.error('Render error:', e);
+                }
+            }
+
+
+            render(data) {
+                document.getElementById('totalLearnings').textContent = data.stats.totalLearnings;
+                
+                const topicList = document.getElementById('topicList');
+                topicList.innerHTML = data.stats.topTopics.map(t => `
+                    <div class="topic-item">
+                        <span>${t.name}</span>
+                        <span style="font-weight: 700;">${t.count}</span>
+                    </div>
+                `).join('');
+
+                const list = document.getElementById('insightList');
+                if (data.insights.length === 0) {
+                    document.getElementById('emptyState').style.display = 'block';
+                    return;
+                }
+
+                document.getElementById('emptyState').style.display = 'none';
+                list.innerHTML = data.insights
+                    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+                    .map(i => `
+                    <div class="insight-card">
+                        <div class="insight-topic">${i.topic}</div>
+                        <div class="insight-text">${i.learning}</div>
+                        <div class="insight-meta">
+                            <div class="tag-list">
+                                ${i.tags.map(t => `<span class="tag">#${t}</span>`).join('')}
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="margin-bottom: 4px;">Confidence: ${Math.round(i.confidence * 100)}%</div>
+                                <div class="confidence-meter">
+                                    <div class="confidence-fill" style="width: ${i.confidence * 100}%"></div>
+                                </div>
+                                <div style="margin-top: 8px;">${new Date(i.timestamp).toLocaleDateString()}</div>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        }
+
+        const app = new LearningBridgeApp();
+    </script>
+</body>
+</html>

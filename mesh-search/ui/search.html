@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="mcp:ui-size" content="minWidth=800;minHeight=600;maxHeight=950">
+    <title>Mesh Universal Search</title>
+    <style>
+        :root {
+            --bg-primary: var(--color-background, #0d1117);
+            --bg-secondary: var(--color-background-soft, #161b22);
+            --border: var(--color-border, #30363d);
+            --text-primary: var(--color-text, #c9d1d9);
+            --text-secondary: var(--color-text-muted, #8b949e);
+            --accent: var(--color-primary, #a371f7);
+            --radius: 12px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+            padding: 60px 20px;
+            overflow-y: auto;
+        }
+
+        .header { text-align: center; margin-bottom: 40px; width: 100%; max-width: 600px; }
+        .header h1 { font-size: 32px; font-weight: 800; color: #fff; margin-bottom: 8px; }
+        .header p { color: var(--text-secondary); font-size: 14px; }
+
+        /* Search Box */
+        .search-container {
+            width: 100%;
+            max-width: 600px;
+            position: relative;
+            margin-bottom: 40px;
+        }
+
+        .search-input {
+            width: 100%;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            color: #fff;
+            padding: 16px 24px;
+            border-radius: 30px;
+            font-size: 18px;
+            outline: none;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            transition: all 0.2s;
+        }
+
+        .search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(163, 113, 247, 0.1); }
+
+        .btn-semantic {
+            position: absolute;
+            right: 8px;
+            top: 8px;
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .btn-semantic:hover { opacity: 0.9; }
+
+        /* Results */
+        .results-container {
+            width: 100%;
+            max-width: 700px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .result-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            cursor: pointer;
+            transition: transform 0.1s, border-color 0.2s;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        .result-card:hover { transform: scale(1.01); border-color: var(--text-secondary); }
+
+        .result-icon {
+            font-size: 24px;
+            width: 48px;
+            height: 48px;
+            background: var(--bg-primary);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--border);
+        }
+
+        .result-body { flex: 1; }
+        .result-type { font-size: 9px; text-transform: uppercase; color: var(--accent); font-weight: 800; margin-bottom: 2px; }
+        .result-title { font-size: 15px; font-weight: 600; color: #fff; }
+        .result-subtitle { font-size: 12px; color: var(--text-secondary); margin-top: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+        .result-date { font-size: 10px; color: var(--text-secondary); white-space: nowrap; }
+
+        .loading-text { text-align: center; color: var(--accent); font-size: 14px; font-weight: 600; padding: 20px; display: none; }
+
+        /* Empty State */
+        .empty-state { text-align: center; padding: 60px 0; color: var(--text-secondary); }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>Mesh Search</h1>
+        <p>Universal discovery across your P2P history, artifacts, and knowledge.</p>
+    </div>
+
+    <div class="search-container">
+        <input type="text" class="search-input" placeholder="Search anything..." id="searchBox">
+        <button class="btn-semantic" id="btnSemantic">✨ Semantic Search</button>
+    </div>
+
+    <div id="loading" class="loading-text">Analyzing Mesh history...</div>
+
+    <div class="results-container" id="results">
+        <div class="empty-state">Start typing to find artifacts, missions, or agents.</div>
+    </div>
+
+    <script>
+        class SearchApp {
+            constructor() {
+                this.init();
+            }
+
+            parseMCP(raw) {
+                if (raw && raw.content && Array.isArray(raw.content)) {
+                    const item = raw.content.find(c => c.type === 'text' && c.text);
+                    if (item) {
+                        try { return JSON.parse(item.text); } catch (e) { return item.text; }
+                    }
+                }
+                return raw;
+            }
+
+            async init() {
+                if (!window.photon) {
+                    console.warn('MCP bridge not found. Using demo data.');
+                    window.photon = {
+                        callTool: async (name, params) => {
+                            if (name === 'main') return { profile: {name: 'Demo User'}, recentQueries: ['react', 'mcp'], savedSearches: [] };
+                            if (name === 'search') return { results: [{id: 'r1', type: 'artifact', icon: '🖼️', title: 'Test Result', subtitle: 'Search working', date: new Date().toISOString()}] };
+                            return {};
+                        },
+                        onEmit: () => {},
+                        onResult: () => {}
+                    };
+                }
+
+                // Handle real-time results and emissions
+                window.photon.onResult((result) => {
+                    const data = this.parseMCP(result);
+                    if (data && data.results) this.render(data.results);
+                });
+
+                window.photon.onEmit((event) => {
+                    if (event && event.type === 'update') {
+                        // Refresh logic if needed
+                    }
+                });
+                
+                const searchBox = document.getElementById('searchBox');
+                searchBox.oninput = (e) => this.performSearch(e.target.value);
+
+                document.getElementById('btnSemantic').onclick = () => this.performSemanticSearch();
+            }
+
+            async performSearch(query) {
+                if (!query) {
+                    document.getElementById('results').innerHTML = '<div class="empty-state">Start typing to find artifacts, missions, or agents.</div>';
+                    return;
+                }
+
+                const data = await window.photon.callTool('search', { query });
+                this.render(data.results);
+            }
+
+            async performSemanticSearch() {
+                const query = document.getElementById('searchBox').value.trim();
+                if (!query) return;
+
+                const loader = document.getElementById('loading');
+                const btn = document.getElementById('btnSemantic');
+                loader.style.display = 'block';
+                btn.disabled = true;
+
+                try {
+                    const data = await window.photon.callTool('semantic_search', { query });
+                    this.render(data.results);
+                } catch (e) {
+                    alert(e.message);
+                } finally {
+                    loader.style.display = 'none';
+                    btn.disabled = false;
+                }
+            }
+
+            render(results) {
+                const container = document.getElementById('results');
+                if (results.length === 0) {
+                    container.innerHTML = '<div class="empty-state">No matching items found in the Mesh.</div>';
+                    return;
+                }
+
+                container.innerHTML = results.map(r => `
+                    <div class="result-card" data-type="${(r.type||'').replace(/"/g,'&quot;')}" data-id="${(r.id||'').replace(/"/g,'&quot;')}">
+                        <div class="result-icon">${r.icon}</div>
+                        <div class="result-body">
+                            <div class="result-type">${r.type}</div>
+                            <div class="result-title">${r.title}</div>
+                            ${r.subtitle ? `<div class="result-subtitle">${r.subtitle}</div>` : ''}
+                        </div>
+                        ${r.date ? `<div class="result-date">${new Date(r.date).toLocaleDateString()}</div>` : ''}
+                    </div>
+                `).join('');
+
+                container.querySelectorAll('.result-card').forEach(card => {
+                    card.addEventListener('click', () => app.openResult(card.dataset.type, card.dataset.id));
+                });
+            }
+
+            openResult(type, id) {
+                alert(`Navigate to ${type} [ID: ${id}] in the corresponding photon dashboard.`);
+            }
+        }
+
+        const app = new SearchApp();
+    </script>
+</body>
+</html>

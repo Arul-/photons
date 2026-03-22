@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="mcp:ui-size" content="minWidth=600;minHeight=650;maxHeight=900">
+    <title>Mesh Control Center</title>
+    <style>
+        :root {
+            --bg-primary: var(--color-background, #0d1117);
+            --bg-secondary: var(--color-background-soft, #161b22);
+            --border: var(--color-border, #30363d);
+            --text-primary: var(--color-text, #c9d1d9);
+            --text-secondary: var(--color-text-muted, #8b949e);
+            --accent: var(--color-primary, #a371f7);
+            --radius: 12px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            overflow-y: auto;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 500px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 24px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .card-title { font-size: 16px; font-weight: 700; color: #fff; text-transform: uppercase; letter-spacing: 1px; }
+
+        /* Form Elements */
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .form-group label { font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; }
+        
+        input, textarea, select {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 10px 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            outline: none;
+        }
+
+        input:focus { border-color: var(--accent); }
+
+        .btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-weight: 700;
+            cursor: pointer;
+            width: 100%;
+            transition: opacity 0.2s;
+        }
+
+        .btn:hover { opacity: 0.9; }
+
+        /* Theme Preview */
+        .theme-preview {
+            display: flex;
+            gap: 12px;
+            margin-top: 8px;
+        }
+
+        .color-dot {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid transparent;
+        }
+        .color-dot.active { border-color: #fff; transform: scale(1.1); }
+
+        /* Wallet Display */
+        .wallet-stat {
+            background: var(--bg-primary);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            border: 1px solid var(--border);
+        }
+        .wallet-val { font-size: 32px; font-weight: 800; color: #f1e05a; }
+        .wallet-label { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; margin-top: 4px; }
+
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            background: var(--accent);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-weight: 600;
+            display: none;
+            animation: fadeIn 0.3s;
+        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1 style="font-size: 28px; margin-bottom: 8px;">Mesh Control Center</h1>
+        <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 20px;">Manage your global identity and P2P ecosystem settings.</p>
+
+        <!-- Identity Section -->
+        <div class="card">
+            <div class="card-header">
+                <span>👤</span>
+                <div class="card-title">Global Identity</div>
+            </div>
+            <div class="form-group">
+                <label>Display Name</label>
+                <input type="text" id="meshName" placeholder="Your name in the mesh">
+            </div>
+            <div class="form-group">
+                <label>Global Bio (Used by AI Matchmaker)</label>
+                <textarea id="meshBio" rows="3" placeholder="Tell the mesh who you are..."></textarea>
+            </div>
+            <div class="form-group">
+                <label>Static Peer ID</label>
+                <input type="text" id="meshPeerId" readonly style="opacity: 0.6; font-family: monospace;">
+            </div>
+        </div>
+
+        <!-- Theme Section -->
+        <div class="card">
+            <div class="card-header">
+                <span>🎨</span>
+                <div class="card-title">Look & Feel</div>
+            </div>
+            <div class="form-group">
+                <label>Interface Mode</label>
+                <select id="themeMode">
+                    <option value="dark">Deep Space (Dark)</option>
+                    <option value="light">Clear Skies (Light)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Accent Color</label>
+                <div class="theme-preview">
+                    <div class="color-dot active" style="background: #a371f7;" data-color="#a371f7"></div>
+                    <div class="color-dot" style="background: #58a6ff;" data-color="#58a6ff"></div>
+                    <div class="color-dot" style="background: #3fb950;" data-color="#3fb950"></div>
+                    <div class="color-dot" style="background: #f85149;" data-color="#f85149"></div>
+                    <div class="color-dot" style="background: #f1e05a;" data-color="#f1e05a"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Wallet Section -->
+        <div class="card">
+            <div class="card-header">
+                <span>💰</span>
+                <div class="card-title">Global Ledger</div>
+            </div>
+            <div class="wallet-stat">
+                <div class="wallet-val" id="meshBalance">0</div>
+                <div class="wallet-label">Total Mesh Credits</div>
+            </div>
+        </div>
+
+        <button class="btn" onclick="app.save()">Sync Global Settings</button>
+    </div>
+
+    <div class="toast" id="toast">Settings synchronized across Mesh!</div>
+
+    <script>
+        class MeshControlApp {
+            constructor() {
+                this.selectedAccent = '#a371f7';
+                this.init();
+            }
+
+            parseMCP(raw) {
+                if (raw && raw.content && Array.isArray(raw.content)) {
+                    const item = raw.content.find(c => c.type === 'text' && c.text);
+                    if (item) {
+                        try { return JSON.parse(item.text); } catch (e) { return item.text; }
+                    }
+                }
+                return raw;
+            }
+
+            async init() {
+                if (!window.photon) {
+                    console.warn('MCP bridge not found. Using demo data.');
+                    window.photon = {
+                        callTool: async (name) => {
+                            if (name === 'main') return { profile: {name: 'Demo User', bio: 'AI Researcher', peerId: 'local-123'}, theme: {mode: 'dark', accent: '#a371f7'}, wallet: {balance: 100}, metrics: {uptime: '99%'} };
+                            return {};
+                        },
+                        onEmit: () => {},
+                        onResult: () => {}
+                    };
+                }
+
+                // Handle real-time results and emissions
+                window.photon.onResult((result) => {
+                    const data = this.parseMCP(result);
+                    if (data && data.profile) this.render(data);
+                });
+
+                window.photon.onEmit((event) => {
+                    if (event && event.type === 'update') {
+                        window.photon.callTool('main', {}).then(raw => this.render(this.parseMCP(raw)));
+                    }
+                });
+
+                try {
+                    const raw = await window.photon.callTool('main', {});
+                    this.render(this.parseMCP(raw));
+                } catch(e) {
+                    console.error('Render error:', e);
+                }
+
+                // Setup color dots
+                document.querySelectorAll('.color-dot').forEach(dot => {
+                    dot.onclick = () => {
+                        this.selectedAccent = dot.dataset.color;
+                        document.querySelectorAll('.color-dot').forEach(d => d.classList.remove('active'));
+                        dot.classList.add('active');
+                    };
+                });
+            }
+
+            render(config) {
+                document.getElementById('meshName').value = config.profile.name;
+                document.getElementById('meshBio').value = config.profile.bio;
+                document.getElementById('meshPeerId').value = config.profile.peerId;
+                document.getElementById('meshBalance').textContent = config.wallet.balance;
+                document.getElementById('themeMode').value = config.theme.mode;
+                
+                this.selectedAccent = config.theme.accent;
+                document.querySelectorAll('.color-dot').forEach(dot => {
+                    if (dot.dataset.color === this.selectedAccent) dot.classList.add('active');
+                });
+            }
+
+            async save() {
+                const profile = {
+                    name: document.getElementById('meshName').value,
+                    bio: document.getElementById('meshBio').value,
+                    peerId: document.getElementById('meshPeerId').value
+                };
+
+                const theme = {
+                    mode: document.getElementById('themeMode').value,
+                    accent: this.selectedAccent,
+                    radius: '12px'
+                };
+
+                await window.photon.callTool('update_config', { profile, theme });
+                
+                const toast = document.getElementById('toast');
+                toast.style.display = 'block';
+                setTimeout(() => toast.style.display = 'none', 3000);
+            }
+        }
+
+        const app = new MeshControlApp();
+    </script>
+</body>
+</html>

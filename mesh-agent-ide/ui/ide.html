@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="mcp:ui-size" content="minWidth=1000;minHeight=700;maxHeight=950">
+    <title>Mesh Agent IDE</title>
+    <style>
+        :root {
+            --bg-primary: var(--color-background, #0d1117);
+            --bg-secondary: var(--color-background-soft, #161b22);
+            --bg-tertiary: var(--color-background-mute, #21262d);
+            --border: var(--color-border, #30363d);
+            --text-primary: var(--color-text, #c9d1d9);
+            --text-secondary: var(--color-text-soft, #8b949e);
+            --accent: var(--color-accent, #a371f7);
+            --radius: 12px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            height: 100vh;
+            display: flex;
+            overflow: hidden;
+        }
+
+        /* Layout */
+        .sidebar {
+            width: 280px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            padding: 24px;
+        }
+
+        .editor {
+            flex: 1;
+            padding: 40px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 32px;
+        }
+
+        /* Sidebar Elements */
+        .section-title {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+            letter-spacing: 1px;
+        }
+
+        .agent-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .agent-item {
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid transparent;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .agent-item:hover { background: var(--bg-tertiary); }
+        .agent-item.active { background: var(--bg-tertiary); border-color: var(--accent); }
+
+        .agent-name { font-weight: 600; font-size: 14px; color: #fff; }
+        .agent-role { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+
+        /* Editor Cards */
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 24px;
+        }
+
+        .card-title { font-size: 16px; font-weight: 700; margin-bottom: 20px; display: flex; justify-content: space-between; }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+
+        .form-group label { font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; }
+        
+        input, textarea, select {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            outline: none;
+            font-family: inherit;
+        }
+
+        textarea { resize: vertical; min-height: 100px; font-family: 'SF Mono', monospace; font-size: 13px; }
+
+        .btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .btn:hover { opacity: 0.9; }
+        .btn-secondary { background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-primary); }
+
+        /* Checkbox list */
+        .tool-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 12px;
+        }
+
+        .tool-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            padding: 8px;
+            background: var(--bg-primary);
+            border-radius: 6px;
+            border: 1px solid var(--border);
+        }
+
+        /* Playground */
+        .playground {
+            border-top: 1px solid var(--border);
+            padding-top: 24px;
+            margin-top: 24px;
+        }
+
+        .chat-bubble {
+            padding: 12px 16px;
+            border-radius: 12px;
+            margin-bottom: 12px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .chat-user { background: var(--bg-tertiary); align-self: flex-end; }
+        .chat-agent { background: rgba(163, 113, 247, 0.1); border: 1px solid var(--accent); }
+
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="section-title">My Agents</div>
+        <div class="agent-list" id="agentList">
+            <!-- Populated by script -->
+        </div>
+        <button class="btn btn-secondary" style="margin-top: 20px; width: 100%;" onclick="app.createNewAgent()">+ New Persona</button>
+    </div>
+
+    <div class="editor" id="editor" style="display: none;">
+        <div class="card">
+            <div class="card-title">
+                <span>Identity & Personality</span>
+                <button class="btn-small" onclick="app.deleteAgent()" style="color: #f85149; background: transparent; border: none; cursor: pointer; font-size: 11px;">DELETE AGENT</button>
+            </div>
+            <div class="form-group">
+                <label>Agent Name</label>
+                <input type="text" id="agentName" placeholder="e.g. Socrates 2.0">
+            </div>
+            <div class="form-group">
+                <label>Core Role</label>
+                <input type="text" id="agentRole" placeholder="e.g. Philosophical Guide">
+            </div>
+            <div class="form-group">
+                <label>System Prompt (Personality)</label>
+                <textarea id="systemPrompt" placeholder="You are a stoic philosopher who answers questions with deep wisdom and brevity..."></textarea>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Learning & Tools</div>
+            <div class="form-group">
+                <label>Learning Goals (What should I extract from missions?)</label>
+                <textarea id="learningGoals" placeholder="Enter goals, one per line..."></textarea>
+            </div>
+            <div class="form-group">
+                <label>Tool Permissions (Photons)</label>
+                <div class="tool-grid" id="toolGrid">
+                    <!-- Populated by script -->
+                </div>
+            </div>
+        </div>
+
+        <div style="display: flex; gap: 16px;">
+            <button class="btn" onclick="app.saveAgent()">Save Agent Configuration</button>
+        </div>
+
+        <!-- Playground -->
+        <div class="card playground">
+            <div class="card-title">Testing Playground</div>
+            <div id="chatBox" style="margin-bottom: 20px; max-height: 200px; overflow-y: auto;">
+                <p style="color: var(--text-secondary); font-size: 12px; text-align: center;">Send a message to test this persona's 'brain'.</p>
+            </div>
+            <div style="display: flex; gap: 12px;">
+                <input type="text" id="testInput" placeholder="Type something..." style="flex: 1;">
+                <button class="btn btn-secondary" onclick="app.testAgent()" id="btnTest">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="emptyState" style="flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text-secondary);">
+        <div style="text-align: center;">
+            <div style="font-size: 48px; margin-bottom: 16px;">🤖</div>
+            <p>Select an agent to customize their personality or create a new one.</p>
+        </div>
+    </div>
+
+    <script>
+        class AgentIDEApp {
+            constructor() {
+                this.agents = [];
+                this.currentId = null;
+                this.availableTools = [];
+                this.init();
+            }
+
+            
+            async init() {
+                if (!window.photon) {
+                    console.warn('MCP bridge not found. Using demo data.');
+                    window.photon = {
+                        callTool: async (name) => {
+                            if (name === 'main') return { profile: {name: 'Demo User'}, agents: [{id: 'a1', name: 'Demo Agent', role: 'Assistant'}], metrics: {active: 1} };
+                            if (name === 'list_available_tools') return [];
+                            return {};
+                        },
+                        onEmit: () => {},
+                        onResult: () => {}
+                    };
+                }
+                
+                try {
+                    const data = await window.photon.callTool('main', {});
+                    if(this.render) this.render(data);
+                    if(this.renderChart) this.renderChart(data);
+                } catch(e) {
+                    console.error('Render error:', e);
+                }
+            }
+
+                this.renderAgentList();
+                this.renderToolGrid();
+            }
+
+            renderAgentList() {
+                const list = document.getElementById('agentList');
+                list.innerHTML = this.agents.map(a => `
+                    <div class="agent-item ${a.id === this.currentId ? 'active' : ''}" onclick="app.selectAgent('${a.id}')">
+                        <div class="agent-name">${a.name}</div>
+                        <div class="agent-role">${a.role}</div>
+                    </div>
+                `).join('');
+            }
+
+            renderToolGrid() {
+                const grid = document.getElementById('toolGrid');
+                grid.innerHTML = this.availableTools.map(t => `
+                    <div class="tool-option">
+                        <input type="checkbox" value="${t}" class="tool-check">
+                        <span>${t}</span>
+                    </div>
+                `).join('');
+            }
+
+            selectAgent(id) {
+                this.currentId = id;
+                const agent = this.agents.find(a => a.id === id);
+                
+                document.getElementById('emptyState').style.display = 'none';
+                document.getElementById('editor').style.display = 'flex';
+                
+                document.getElementById('agentName').value = agent.name;
+                document.getElementById('agentRole').value = agent.role;
+                document.getElementById('systemPrompt').value = agent.systemPrompt;
+                document.getElementById('learningGoals').value = agent.learningGoals.join('\n');
+                
+                // Set checkboxes
+                document.querySelectorAll('.tool-check').forEach(cb => {
+                    cb.checked = agent.allowedTools.includes(cb.value);
+                });
+
+                this.renderAgentList();
+                document.getElementById('chatBox').innerHTML = '';
+            }
+
+            createNewAgent() {
+                const id = `agent-${Date.now()}`;
+                const newAgent = {
+                    id,
+                    name: 'New Agent',
+                    role: 'Assistant',
+                    systemPrompt: 'You are a helpful AI assistant.',
+                    learningGoals: [],
+                    allowedTools: []
+                };
+                this.agents.push(newAgent);
+                this.selectAgent(id);
+            }
+
+            async saveAgent() {
+                const agent = {
+                    id: this.currentId,
+                    name: document.getElementById('agentName').value,
+                    role: document.getElementById('agentRole').value,
+                    systemPrompt: document.getElementById('systemPrompt').value,
+                    learningGoals: document.getElementById('learningGoals').value.split('\n').filter(g => g.trim()),
+                    allowedTools: Array.from(document.querySelectorAll('.tool-check:checked')).map(cb => cb.value)
+                };
+
+                await window.photon.callTool('save_agent', { persona: agent });
+                const index = this.agents.findIndex(a => a.id === agent.id);
+                this.agents[index] = agent;
+                this.renderAgentList();
+                alert('Agent saved successfully!');
+            }
+
+            async deleteAgent() {
+                if (confirm('Permanently delete this agent?')) {
+                    await window.photon.callTool('delete_agent', { id: this.currentId });
+                    this.agents = this.agents.filter(a => a.id !== this.currentId);
+                    this.currentId = null;
+                    document.getElementById('editor').style.display = 'none';
+                    document.getElementById('emptyState').style.display = 'flex';
+                    this.renderAgentList();
+                }
+            }
+
+            async testAgent() {
+                const input = document.getElementById('testInput').value.trim();
+                if (!input) return;
+
+                const chatBox = document.getElementById('chatBox');
+                chatBox.innerHTML += `<div class="chat-bubble chat-user">${input}</div>`;
+                document.getElementById('testInput').value = '';
+
+                const btn = document.getElementById('btnTest');
+                btn.textContent = 'Thinking...';
+                btn.disabled = true;
+
+                try {
+                    const res = await window.photon.callTool('test_personality', { id: this.currentId, input });
+                    chatBox.innerHTML += `<div class="chat-bubble chat-agent">${res.response}</div>`;
+                    chatBox.scrollTop = chatBox.scrollHeight;
+                } catch (e) {
+                    alert(e.message);
+                } finally {
+                    btn.textContent = 'Send';
+                    btn.disabled = false;
+                }
+            }
+        }
+
+        const app = new AgentIDEApp();
+    </script>
+</body>
+</html>
