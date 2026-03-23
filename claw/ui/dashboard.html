@@ -7,17 +7,17 @@
   <title>Claw Pipeline</title>
   <style>
     :root {
-      --bg-primary: #0d0d0d;
-      --bg-secondary: #1a1a1a;
-      --bg-tertiary: #262626;
-      --bg-card: #1e1e1e;
+      --bg-primary: #0a0e1a;
+      --bg-secondary: #111827;
+      --bg-tertiary: #1e293b;
+      --bg-card: #151d2e;
       --text-primary: #e6e6e6;
       --text-secondary: #a0a0a0;
       --text-muted: #666;
-      --border-color: #333;
-      --accent: #ef4444;
-      --accent-hover: #dc2626;
-      --accent-dim: rgba(239, 68, 68, 0.15);
+      --border-color: #2a3348;
+      --accent: #67c7ff;
+      --accent-hover: #4fb8f7;
+      --accent-dim: rgba(103, 199, 255, 0.15);
       --green: #10b981;
       --green-dim: rgba(16, 185, 129, 0.15);
       --yellow: #f59e0b;
@@ -38,7 +38,9 @@
       --text-secondary: #52525b;
       --text-muted: #a1a1aa;
       --border-color: #d4d4d8;
-      --accent-dim: rgba(239, 68, 68, 0.1);
+      --accent: #2196f3;
+      --accent-hover: #1976d2;
+      --accent-dim: rgba(103, 199, 255, 0.1);
       --green-dim: rgba(16, 185, 129, 0.1);
       --yellow-dim: rgba(245, 158, 11, 0.1);
       --blue-dim: rgba(59, 130, 246, 0.1);
@@ -72,7 +74,7 @@
       padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
     }
     .pipeline-badge.running { background: var(--green-dim); color: var(--green); }
-    .pipeline-badge.stopped { background: var(--accent-dim); color: var(--accent); }
+    .pipeline-badge.stopped { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
     .pipeline-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
     .pipeline-badge.running .pipeline-dot { animation: pulse 2s ease-in-out infinite; }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
@@ -101,14 +103,14 @@
     .btn-primary:hover { background: #2563eb; }
     .btn-start { background: var(--green); color: #fff; border-color: var(--green); }
     .btn-start:hover { background: #0ea472; }
-    .btn-stop { background: var(--accent-dim); color: var(--accent); border-color: transparent; }
-    .btn-stop:hover { background: var(--accent); color: #fff; }
+    .btn-stop { background: rgba(239, 68, 68, 0.15); color: #ef4444; border-color: transparent; }
+    .btn-stop:hover { background: #ef4444; color: #fff; }
     .btn-sm { padding: 3px 8px; font-size: 11px; }
     .btn-ghost { background: transparent; border-color: transparent; }
     .btn-ghost:hover { background: var(--bg-tertiary); }
     .btn-icon { padding: 5px 7px; font-size: 14px; line-height: 1; }
-    .btn-danger { color: var(--accent); }
-    .btn-danger:hover { background: var(--accent-dim); }
+    .btn-danger { color: #ef4444; }
+    .btn-danger:hover { background: rgba(239, 68, 68, 0.15); }
 
     /* ── Main 3-Zone Layout ── */
     .main { display: flex; flex: 1; overflow: hidden; }
@@ -229,7 +231,7 @@
     .activity-item .ai-time { color: var(--text-muted); font-size: 10px; margin-top: 3px; }
     .activity-item.ai-incoming { border-left: 2px solid var(--blue); }
     .activity-item.ai-outgoing { border-left: 2px solid var(--green); }
-    .activity-item.ai-error { border-left: 2px solid var(--accent); }
+    .activity-item.ai-error { border-left: 2px solid #ef4444; }
 
     /* Inject form at bottom of activity */
     .inject-form {
@@ -780,16 +782,16 @@
           <div class="inline-panel" style="margin-top:12px;">
             <h3>Schedule New Task</h3>
             <div class="form-row">
-              <label>Task Name</label>
-              <input type="text" class="form-input" id="newTaskName" placeholder="daily-summary">
-            </div>
-            <div class="form-row">
-              <label>Cron / Interval</label>
+              <label>Schedule</label>
               <input type="text" class="form-input" id="newTaskCron" placeholder="@daily or */30 * * * *">
             </div>
             <div class="form-row">
-              <label>Prompt</label>
-              <textarea class="form-textarea" id="newTaskPrompt" placeholder="What should the agent do?"></textarea>
+              <label>Method <span style="font-weight:normal;text-transform:none">(optional)</span></label>
+              <input type="text" class="form-input" id="newTaskName" placeholder="e.g. summarize">
+            </div>
+            <div class="form-row">
+              <label>Params <span style="font-weight:normal;text-transform:none">(optional, JSON or text)</span></label>
+              <textarea class="form-textarea" id="newTaskPrompt" placeholder='{"prompt": "Summarize recent messages"}'></textarea>
             </div>
             <div class="form-actions">
               <button class="btn btn-sm btn-primary" id="createTaskBtn">Create Task</button>
@@ -905,8 +907,11 @@
       <select class="form-select" id="injectGroup" style="margin-bottom:4px;">
         <option value="">Select group...</option>
       </select>
+      <div class="inject-row" style="margin-bottom:4px;">
+        <input type="text" class="form-input" id="injectFrom" placeholder="From: +60123456789" style="flex:1">
+      </div>
       <div class="inject-row">
-        <input type="text" class="form-input" id="injectMsg" placeholder="Test message..." style="flex:1">
+        <input type="text" class="form-input" id="injectMsg" placeholder="Message body..." style="flex:1">
         <button class="btn btn-sm btn-primary" id="injectBtn">Send</button>
       </div>
     </div>
@@ -937,6 +942,7 @@
 
   const $ = id => document.getElementById(id);
   const MAX_ACTIVITY = 50;
+  const claw = window["claw"];
 
   function parseMCP(raw) {
     if (raw && raw.content && Array.isArray(raw.content)) {
@@ -1005,7 +1011,7 @@
     const waRaw = (waObj && typeof waObj === 'object') ? (waObj.status || 'unknown') : String(waObj || '--');
     const waConnected = /connect|open|ready/i.test(waRaw);
     $('waStatus').textContent = waRaw;
-    $('waDot').style.background = waConnected ? 'var(--green)' : 'var(--accent)';
+    $('waDot').style.background = waConnected ? 'var(--green)' : '#ef4444';
     $('waIcon').classList.toggle('disconnected', !waConnected);
 
     // Telegram status — object with .status and .polling fields
@@ -1014,7 +1020,7 @@
     const tgPolling = (tgObj && typeof tgObj === 'object') ? tgObj.polling : '';
     const tgConnected = /connect/i.test(tgRaw) || /active/i.test(tgPolling);
     $('tgStatus').textContent = tgConnected && tgPolling === 'active' ? 'polling' : tgRaw;
-    $('tgDot').style.background = tgConnected ? 'var(--green)' : 'var(--accent)';
+    $('tgDot').style.background = tgConnected ? 'var(--green)' : '#ef4444';
     $('tgIcon').classList.toggle('disconnected', !tgConnected);
 
     // Queue indicator
@@ -1040,7 +1046,6 @@
     container.innerHTML = state.groups.map(g => {
       const sel = state.selectedGroup === g.name ? ' selected' : '';
       const ac = g.agent || 'claude';
-      const queueActive = Object.values(state.queue || {}).some(q => q.active > 0);
       return '<div class="group-card' + sel + '" data-name="' + esc(g.name) + '">' +
         '<div class="gc-row">' +
           '<span class="gc-name">' + esc(g.name) + '</span>' +
@@ -1085,10 +1090,34 @@
     $('aggTasks').textContent = state.tasks.length || '--';
 
     // Health
+    renderHealthPanel();
+  }
+
+  function renderHealthPanel() {
     const h = state.health;
-    if (h) {
-      $('aggHealthDot').className = 'health-dot ' + (h.ok ? 'ok' : 'error');
-      $('aggHealthLabel').textContent = h.ok ? 'All systems healthy' : 'Issues detected';
+    if (!h) return;
+
+    // Aggregate health in dashboard view
+    $('aggHealthDot').className = 'health-dot ' + (h.ok ? 'ok' : 'error');
+    $('aggHealthLabel').textContent = h.ok ? 'All systems healthy' : 'Issues detected';
+
+    // Render detailed health grid
+    const grid = $('aggHealthGrid');
+    const items = [];
+    if (h.whatsapp) {
+      const wOk = /connect|open|ready/i.test(typeof h.whatsapp === 'object' ? h.whatsapp.status : h.whatsapp);
+      items.push('<div class="health-item"><span class="health-dot ' + (wOk ? 'ok' : 'error') + '"></span> WhatsApp</div>');
+    }
+    if (h.telegram) {
+      const tOk = /connect|active/i.test(typeof h.telegram === 'object' ? (h.telegram.status || h.telegram.polling) : h.telegram);
+      items.push('<div class="health-item"><span class="health-dot ' + (tOk ? 'ok' : 'error') + '"></span> Telegram</div>');
+    }
+    if (h.runner !== undefined) {
+      const rOk = h.runner === true || (typeof h.runner === 'object' && h.runner.ok);
+      items.push('<div class="health-item"><span class="health-dot ' + (rOk ? 'ok' : 'error') + '"></span> Runner</div>');
+    }
+    if (items.length > 0) {
+      grid.innerHTML = '<div class="health-item"><span class="health-dot ' + (h.ok ? 'ok' : 'error') + '"></span> <span>' + (h.ok ? 'All systems healthy' : 'Issues detected') + '</span></div>' + items.join('');
     }
   }
 
@@ -1147,11 +1176,11 @@
     const list = $('sendersList');
     if (senders.length > 0) {
       list.innerHTML = senders.map(s =>
-        '<span class="sender-tag">+' + esc(s) +
-        ' <span class="remove-sender" data-phone="' + esc(s) + '">&times;</span></span>'
+        '<span class="sender-tag">' + esc(s) +
+        ' <span class="remove-sender" data-number="' + esc(s) + '">&times;</span></span>'
       ).join('');
       list.querySelectorAll('.remove-sender').forEach(el => {
-        el.addEventListener('click', e => { e.stopPropagation(); removeSender(el.dataset.phone); });
+        el.addEventListener('click', e => { e.stopPropagation(); removeSender(el.dataset.number); });
       });
     } else {
       list.innerHTML = '<span style="color:var(--text-muted);font-size:12px;">All senders allowed</span>';
@@ -1205,11 +1234,11 @@
     ).join('');
   }
 
-  // ─── Actions ───
+  // ─── Backend Calls (via window["claw"] MCP bridge) ───
 
   async function loadStatus() {
     try {
-      const raw = await window.photon.callTool('status', {});
+      const raw = await claw.status();
       const data = parseMCP(raw);
       if (data && typeof data === 'object') {
         // Detect renames
@@ -1246,7 +1275,7 @@
 
   async function loadHealth() {
     try {
-      const raw = await window.photon.callTool('health', {});
+      const raw = await claw.health();
       state.health = parseMCP(raw);
       renderDetail();
     } catch (e) { console.error('Health failed:', e); }
@@ -1254,11 +1283,38 @@
 
   async function loadTasks() {
     try {
-      const raw = await window.photon.callTool('tasks', {});
+      const raw = await claw.tasks();
       state.tasks = parseMCP(raw) || [];
       renderTasks();
       renderAggView();
     } catch (e) { console.error('Tasks failed:', e); }
+  }
+
+  async function loadSenders() {
+    if (!state.selectedGroup) return;
+    try {
+      const raw = await claw.senders({ group: state.selectedGroup });
+      const data = parseMCP(raw);
+      const g = state.groups.find(x => x.name === state.selectedGroup);
+      if (g && Array.isArray(data)) {
+        g.allowedSenders = data;
+        renderSenders(g);
+      }
+    } catch (e) { console.error('Senders failed:', e); }
+  }
+
+  async function loadMessageHistory() {
+    if (!state.selectedGroup) return;
+    try {
+      const raw = await claw.history({ group: state.selectedGroup });
+      const messages = parseMCP(raw) || [];
+      // Push recent messages into activity feed
+      messages.slice(-20).forEach(m => {
+        const type = m.fromMe ? 'outgoing' : 'incoming';
+        const body = m.body || m.message || '';
+        addActivity(type, state.selectedGroup, body);
+      });
+    } catch (e) { console.error('History failed:', e); }
   }
 
   function selectGroup(name) {
@@ -1266,6 +1322,7 @@
     switchTab('overview');
     renderGroups();
     renderDetail();
+    loadSenders();
   }
 
   async function togglePipeline() {
@@ -1273,7 +1330,7 @@
     btn.disabled = true;
     if (state.running) {
       try {
-        await window.photon.callTool('stop', {});
+        await claw.stop();
         state.running = false;
         renderHeader();
         toast('Pipeline stopped', 'success');
@@ -1282,7 +1339,7 @@
     } else {
       btn.textContent = 'Starting...';
       try {
-        await window.photon.callTool('start', {});
+        await claw.start();
         state.running = true;
         renderHeader();
         toast('Pipeline started', 'success');
@@ -1306,7 +1363,7 @@
       systemPrompt: $('cfgSystemPrompt').value,
     };
     try {
-      await window.photon.callTool('configure', params);
+      await claw.configure(params);
       toast('Configuration saved', 'success');
       loadStatus();
     } catch (e) { toast('Save failed: ' + (e.message || e), 'error'); }
@@ -1315,7 +1372,7 @@
   async function resetSession() {
     if (!state.selectedGroup) return;
     try {
-      await window.photon.callTool('reset', { group: state.selectedGroup });
+      await claw.clear({ group: state.selectedGroup });
       toast('Session reset', 'success');
     } catch (e) { toast('Reset failed: ' + (e.message || e), 'error'); }
   }
@@ -1323,7 +1380,7 @@
   async function clearLog() {
     if (!state.selectedGroup) return;
     try {
-      await window.photon.callTool('clear', { group: state.selectedGroup });
+      await claw.clear({ group: state.selectedGroup });
       toast('Log cleared', 'success');
     } catch (e) { toast('Clear failed: ' + (e.message || e), 'error'); }
   }
@@ -1333,7 +1390,7 @@
     $('compactBtn').disabled = true;
     $('compactBtn').textContent = 'Compacting...';
     try {
-      const raw = await window.photon.callTool('compact', { group: state.selectedGroup });
+      const raw = await claw.clear({ group: state.selectedGroup });
       const result = parseMCP(raw);
       $('compactResult').style.display = '';
       $('compactDetails').innerHTML =
@@ -1351,7 +1408,7 @@
     if (!state.selectedGroup) return;
     const name = state.selectedGroup;
     try {
-      await window.photon.callTool('unregister', { group: name });
+      await claw.unregister({ group: name });
       state.groups = state.groups.filter(g => g.name !== name);
       state.selectedGroup = null;
       renderGroups();
@@ -1363,35 +1420,36 @@
 
   async function addSender() {
     if (!state.selectedGroup) return;
-    const phone = $('addSenderInput').value.trim();
-    if (!phone) return;
+    const number = $('addSenderInput').value.trim();
+    if (!number) return;
     try {
-      await window.photon.callTool('allow', { group: state.selectedGroup, phone });
+      await claw.allow({ group: state.selectedGroup, number });
       $('addSenderInput').value = '';
       toast('Sender added', 'success');
-      loadStatus();
+      loadSenders();
     } catch (e) { toast('Add failed: ' + (e.message || e), 'error'); }
   }
 
-  async function removeSender(phone) {
+  async function removeSender(number) {
     if (!state.selectedGroup) return;
     try {
-      await window.photon.callTool('deny', { group: state.selectedGroup, phone });
+      await claw.deny({ group: state.selectedGroup, number });
       toast('Sender removed', 'success');
-      loadStatus();
+      loadSenders();
     } catch (e) { toast('Remove failed: ' + (e.message || e), 'error'); }
   }
 
   async function createTask() {
     if (!state.selectedGroup) return;
-    const name = $('newTaskName').value.trim();
-    const cron = $('newTaskCron').value.trim();
+    const schedule = $('newTaskCron').value.trim();
+    const method = $('newTaskName').value.trim();
     const prompt = $('newTaskPrompt').value.trim();
-    if (!cron || !prompt) { toast('Cron and prompt are required', 'error'); return; }
+    if (!schedule) { toast('Schedule is required', 'error'); return; }
     try {
-      const params = { group: state.selectedGroup, cron, prompt };
-      if (name) params.name = name;
-      await window.photon.callTool('task', params);
+      const params = { group: state.selectedGroup, schedule };
+      if (method) params.method = method;
+      if (prompt) params.params = { prompt };
+      await claw.task(params);
       $('newTaskName').value = '';
       $('newTaskCron').value = '';
       $('newTaskPrompt').value = '';
@@ -1402,7 +1460,7 @@
 
   async function cancelTask(name) {
     try {
-      await window.photon.callTool('cancel', { name });
+      await claw.cancel({ name });
       toast('Task cancelled: ' + name, 'success');
       loadTasks();
     } catch (e) { toast('Cancel failed: ' + (e.message || e), 'error'); }
@@ -1410,12 +1468,13 @@
 
   async function injectMessage() {
     const group = $('injectGroup').value;
-    const message = $('injectMsg').value.trim();
+    const body = $('injectMsg').value.trim();
+    const from = $('injectFrom').value.trim();
     if (!group) { toast('Select a group', 'error'); return; }
-    if (!message) return;
+    if (!body) return;
     try {
-      await window.photon.callTool('inject', { group, message });
-      addActivity('incoming', group, '[injected] ' + message);
+      await claw.inject({ group, from: from || 'dashboard', body });
+      addActivity('incoming', group, '[injected] ' + body);
       $('injectMsg').value = '';
       toast('Message injected', 'success');
     } catch (e) { toast('Inject failed: ' + (e.message || e), 'error'); }
@@ -1426,9 +1485,14 @@
   async function loadPersona() {
     if (!state.selectedGroup) return;
     try {
-      const raw = await window.photon.callTool('persona', { group: state.selectedGroup });
+      const raw = await claw.history({ group: state.selectedGroup });
       const result = parseMCP(raw);
-      $('personaEditor').value = result.persona || '';
+      // Try to extract persona from history or a dedicated field
+      if (typeof result === 'object' && result.persona) {
+        $('personaEditor').value = result.persona || '';
+      } else if (typeof result === 'string') {
+        $('personaEditor').value = result;
+      }
     } catch (e) { $('personaEditor').value = '(Failed to load persona)'; }
   }
 
@@ -1437,7 +1501,7 @@
     $('personaSaveBtn').disabled = true;
     $('personaSaveBtn').textContent = 'Saving...';
     try {
-      await window.photon.callTool('persona', { group: state.selectedGroup, content: $('personaEditor').value });
+      await claw.configure({ group: state.selectedGroup, persona: $('personaEditor').value });
       toast('Persona saved', 'success');
       addActivity('outgoing', state.selectedGroup, 'Persona updated');
     } catch (e) { toast('Save failed: ' + (e.message || e), 'error'); }
@@ -1448,15 +1512,12 @@
   // ─── Skills ───
 
   async function loadSkills() {
+    // Skills are part of group config; pull from state
     if (!state.selectedGroup) return;
-    try {
-      const raw = await window.photon.callTool('skills', { group: state.selectedGroup, action: 'list' });
-      const skills = parseMCP(raw) || [];
-      $('skillCount').textContent = skills.length;
-      renderSkills(skills);
-    } catch (e) {
-      $('skillsList').innerHTML = '<p class="journal-empty">Failed to load skills</p>';
-    }
+    const g = state.groups.find(x => x.name === state.selectedGroup);
+    const skills = (g && g.skills) || [];
+    $('skillCount').textContent = skills.length;
+    renderSkills(skills);
   }
 
   function renderSkills(skills) {
@@ -1466,11 +1527,10 @@
     }
     $('skillsList').innerHTML = skills.map(s =>
       '<div class="skill-item">' +
-        '<span class="skill-name">' + esc(s.name) + '</span>' +
-        '<span class="skill-desc">' + esc(s.description || '') + '</span>' +
-        (s.photon ? '<span class="skill-photon">' + esc(s.photon) + '</span>' : '') +
-        '<span class="skill-source ' + (s.source || 'local') + '">' + (s.source || 'local') + '</span>' +
-        '<button class="btn btn-sm btn-danger btn-ghost skill-remove" data-name="' + esc(s.name) + '">&times;</button>' +
+        '<span class="skill-name">' + esc(typeof s === 'string' ? s : s.name) + '</span>' +
+        '<span class="skill-desc">' + esc((typeof s === 'object' && s.description) || '') + '</span>' +
+        (typeof s === 'object' && s.photon ? '<span class="skill-photon">' + esc(s.photon) + '</span>' : '') +
+        '<button class="btn btn-sm btn-danger btn-ghost skill-remove" data-name="' + esc(typeof s === 'string' ? s : s.name) + '">&times;</button>' +
       '</div>'
     ).join('');
     $('skillsList').querySelectorAll('.skill-remove').forEach(el => {
@@ -1482,38 +1542,37 @@
     if (!state.selectedGroup) return;
     const name = $('newSkillName').value.trim();
     if (!name) { toast('Skill name required', 'error'); return; }
-    const params = {
-      group: state.selectedGroup, action: 'add', skill: name,
-      description: $('newSkillDesc').value.trim() || name,
-    };
-    const photon = $('newSkillPhoton').value.trim();
-    if (photon) params.photon = photon;
+    const g = state.groups.find(x => x.name === state.selectedGroup);
+    const skills = (g && g.skills) || [];
+    skills.push(name);
     try {
-      await window.photon.callTool('skills', params);
+      await claw.configure({ group: state.selectedGroup, skills });
       $('newSkillName').value = '';
       $('newSkillDesc').value = '';
       $('newSkillPhoton').value = '';
       toast('Skill added: ' + name, 'success');
       addActivity('outgoing', state.selectedGroup, 'Skill added: ' + name);
-      loadSkills();
+      loadStatus();
     } catch (e) { toast('Add failed: ' + (e.message || e), 'error'); }
   }
 
   async function removeSkill(name) {
     if (!state.selectedGroup) return;
+    const g = state.groups.find(x => x.name === state.selectedGroup);
+    const skills = ((g && g.skills) || []).filter(s => (typeof s === 'string' ? s : s.name) !== name);
     try {
-      await window.photon.callTool('skills', { group: state.selectedGroup, action: 'remove', skill: name });
+      await claw.configure({ group: state.selectedGroup, skills });
       toast('Skill removed: ' + name, 'success');
-      loadSkills();
+      loadStatus();
     } catch (e) { toast('Remove failed: ' + (e.message || e), 'error'); }
   }
 
-  // ─── Journal ───
+  // ─── Journal (uses history) ───
 
   async function loadJournal() {
     if (!state.selectedGroup) return;
     try {
-      const raw = await window.photon.callTool('journal', { group: state.selectedGroup, days: 7 });
+      const raw = await claw.history({ group: state.selectedGroup });
       const entries = parseMCP(raw) || [];
       renderJournal(entries);
     } catch (e) {
@@ -1523,37 +1582,32 @@
 
   function renderJournal(entries) {
     if (entries.length === 0) {
-      $('journalEntries').innerHTML = '<p class="journal-empty">No journal entries in the last 7 days. The agent records thoughts when responding to messages.</p>';
+      $('journalEntries').innerHTML = '<p class="journal-empty">No messages yet.</p>';
       return;
     }
     // Show newest first, limit to 50
     const shown = entries.slice(-50).reverse();
     $('journalEntries').innerHTML = shown.map(e =>
       '<div class="journal-entry">' +
-        '<div class="je-thought">' + esc(e.thought || '') + '</div>' +
+        '<div class="je-thought">' + esc(e.body || e.thought || e.message || '') + '</div>' +
         '<div class="je-meta">' +
-          '<span>Re: ' + esc((e.userMessage || '').substring(0, 60)) + '</span>' +
-          '<span>' + esc(e.sender || '') + '</span>' +
+          '<span>' + esc(e.from || e.sender || '') + '</span>' +
           '<span>' + (e.timestamp ? timeAgo(e.timestamp) : '') + '</span>' +
         '</div>' +
       '</div>'
     ).join('');
   }
 
-  // ─── Proposals ───
+  // ─── Proposals (via configure) ───
 
   async function loadProposals() {
+    // Proposals are part of group state; pull from status data
     if (!state.selectedGroup) return;
-    try {
-      const raw = await window.photon.callTool('proposals', { group: state.selectedGroup });
-      const proposals = parseMCP(raw) || [];
-      const count = proposals.length;
-      $('proposalCount').textContent = count;
-      $('proposalCount').style.display = count > 0 ? '' : 'none';
-      renderProposals(proposals);
-    } catch (e) {
-      $('proposalsList').innerHTML = '<p class="journal-empty">Failed to load proposals</p>';
-    }
+    const g = state.groups.find(x => x.name === state.selectedGroup);
+    const proposals = (g && g.proposals) || [];
+    $('proposalCount').textContent = proposals.length;
+    $('proposalCount').style.display = proposals.length > 0 ? '' : 'none';
+    renderProposals(proposals);
   }
 
   function renderProposals(proposals) {
@@ -1586,67 +1640,60 @@
   async function approveProposal(name) {
     if (!state.selectedGroup) return;
     try {
-      await window.photon.callTool('approve', { group: state.selectedGroup, proposal: name });
+      await claw.configure({ group: state.selectedGroup, approve: name });
       toast('Proposal approved: ' + name, 'success');
       addActivity('outgoing', state.selectedGroup, 'Approved: ' + name);
-      loadProposals();
-      loadPersona();
-      loadHistory();
+      loadStatus();
     } catch (e) { toast('Approve failed: ' + (e.message || e), 'error'); }
   }
 
   async function rejectProposal(name) {
     if (!state.selectedGroup) return;
     try {
-      await window.photon.callTool('reject', { group: state.selectedGroup, proposal: name });
+      await claw.configure({ group: state.selectedGroup, reject: name });
       toast('Proposal rejected: ' + name, 'success');
-      loadProposals();
-      loadHistory();
+      loadStatus();
     } catch (e) { toast('Reject failed: ' + (e.message || e), 'error'); }
   }
 
-  // ─── Mentor Review ───
+  // ─── Mentor Review (inject a review command) ───
 
   async function runMentorReview() {
     if (!state.selectedGroup) return;
     $('mentorReviewBtn').disabled = true;
     $('mentorReviewBtn').textContent = 'Reviewing...';
     try {
-      const raw = await window.photon.callTool('review', { group: state.selectedGroup });
-      const result = parseMCP(raw);
-      toast('Mentor review complete: ' + (result.proposalsCreated || 0) + ' proposal(s)', 'success');
-      addActivity('outgoing', state.selectedGroup, 'Mentor review: ' + (result.journalEntries || 0) + ' entries analyzed, ' + (result.proposalsCreated || 0) + ' proposals');
-      loadProposals();
-      loadPersona();
-      loadHistory();
+      await claw.inject({ group: state.selectedGroup, from: 'mentor', body: '/review' });
+      toast('Mentor review triggered', 'success');
+      addActivity('outgoing', state.selectedGroup, 'Mentor review triggered');
     } catch (e) { toast('Review failed: ' + (e.message || e), 'error'); }
     $('mentorReviewBtn').disabled = false;
     $('mentorReviewBtn').textContent = 'Mentor Review';
   }
 
-  // ─── History ───
+  // ─── History (evolution via history) ───
 
   async function loadHistory() {
     if (!state.selectedGroup) return;
     try {
-      const raw = await window.photon.callTool('evolution', { group: state.selectedGroup, count: 20 });
+      const raw = await claw.history({ group: state.selectedGroup });
       const entries = parseMCP(raw) || [];
       renderHistory(entries);
     } catch (e) {
-      $('historyList').innerHTML = '<p class="journal-empty">No evolution history</p>';
+      $('historyList').innerHTML = '<p class="journal-empty">No history</p>';
     }
   }
 
   function renderHistory(entries) {
     if (entries.length === 0) {
-      $('historyList').innerHTML = '<p class="journal-empty">No evolution history yet</p>';
+      $('historyList').innerHTML = '<p class="journal-empty">No history yet</p>';
       return;
     }
-    $('historyList').innerHTML = entries.map(e =>
+    $('historyList').innerHTML = entries.slice(-20).reverse().map(e =>
       '<div class="history-entry">' +
-        '<span class="he-hash">' + esc((e.hash || '').substring(0, 7)) + '</span>' +
-        '<span class="he-msg">' + esc(e.message || '') + '</span>' +
-        '<span class="he-date">' + (e.date ? timeAgo(e.date) : '') + '</span>' +
+        '<span class="he-hash">' + esc((e.id || e.hash || '').toString().substring(0, 7)) + '</span>' +
+        '<span class="he-msg">' + esc(e.body || e.message || '') + '</span>' +
+        '<span class="he-date">' + (e.timestamp || e.date ? timeAgo(e.timestamp || e.date) : '') + '</span>' +
       '</div>'
     ).join('');
   }
@@ -1658,6 +1705,8 @@
     if (tabName === 'skills') loadSkills();
     if (tabName === 'journal') loadJournal();
     if (tabName === 'memory') { loadProposals(); loadHistory(); }
+    if (tabName === 'tasks') loadTasks();
+    if (tabName === 'config') loadSenders();
   }
 
   // ─── Register ───
@@ -1680,28 +1729,22 @@
   async function submitRegister() {
     const group = $('regGroup').value.trim();
     if (!group) { toast('Group name required', 'error'); return; }
-    const params = {
-      group,
-      trigger: $('regTrigger').value,
-      folders: $('regFolders').value.split(',').map(s => s.trim()).filter(Boolean),
-      agent: $('regAgent').value,
-      systemPrompt: $('regSystemPrompt').value,
-    };
-    const channel = $('regChannel').value;
-    if (channel) params.channel = channel;
-    const schedule = $('regSchedule').value;
-    if (schedule) params.schedule = schedule;
+    const params = { group };
+    const triggers = $('regTrigger').value.trim();
+    if (triggers) params.triggers = triggers;
+    const agent = $('regAgent').value;
+    if (agent) params.agent = agent;
 
     $('regSubmitBtn').disabled = true;
     $('regSubmitBtn').textContent = 'Registering...';
     try {
-      const raw = await window.photon.callTool('register', params);
+      const raw = await claw.register(params);
       const result = parseMCP(raw);
       $('registerPanel').style.display = 'none';
-      toast('Registered: ' + (result.name || group), 'success');
-      addActivity('outgoing', result.name || group, 'Group registered');
+      toast('Registered: ' + (result.name || result.group || group), 'success');
+      addActivity('outgoing', result.name || result.group || group, 'Group registered');
       loadStatus();
-      if (result.name) selectGroup(result.name);
+      if (result.name || result.group) selectGroup(result.name || result.group);
     } catch (e) {
       toast('Register failed: ' + (e.message || e), 'error');
     }
@@ -1744,7 +1787,7 @@
       heartbeatIntervalMs: parseInt($('setHeartbeat').value, 10) || 30000,
     };
     try {
-      await window.photon.callTool('settings', settings);
+      await claw.configure(settings);
       state._settings = settings;
       $('settingsPanel').style.display = 'none';
       toast('Settings saved', 'success');
@@ -1760,30 +1803,32 @@
     panel.style.display = '';
     $('discoveryBody').innerHTML = '<tr><td colspan="3" style="color:var(--text-muted)">Loading...</td></tr>';
     try {
-      const raw = await window.photon.callTool('groups', {});
+      const raw = await claw.groups();
       const groups = parseMCP(raw) || [];
       state._discoveredGroups = groups;
-      $('discoveryBody').innerHTML = groups.map(g =>
-        '<tr class="disc-row" data-name="' + esc(g.name) + '" data-channel="' + esc(g.channel) + '">' +
-          '<td>' + esc(g.name) + '</td>' +
-          '<td>' + esc(g.channel) + '</td>' +
-          '<td><span class="reg-badge ' + (g.registered ? 'yes' : 'no') + '">' +
-            (g.registered ? 'registered' : 'available') + '</span></td>' +
-        '</tr>'
-      ).join('');
+      const registered = new Set(state.groups.map(g => g.name));
+      $('discoveryBody').innerHTML = groups.map(g => {
+        const name = typeof g === 'string' ? g : g.name;
+        const channel = typeof g === 'object' ? (g.channel || '') : '';
+        const isReg = registered.has(name);
+        return '<tr class="disc-row" data-name="' + esc(name) + '" data-channel="' + esc(channel) + '">' +
+          '<td>' + esc(name) + '</td>' +
+          '<td>' + esc(channel) + '</td>' +
+          '<td><span class="reg-badge ' + (isReg ? 'yes' : 'no') + '">' +
+            (isReg ? 'registered' : 'available') + '</span></td>' +
+        '</tr>';
+      }).join('');
       document.querySelectorAll('.disc-row').forEach(row => {
         row.style.cursor = 'pointer';
         row.addEventListener('click', () => {
           $('discoveryPanel').style.display = 'none';
-          $('regGroup').value = row.dataset.name;
-          $('regChannel').value = row.dataset.channel;
           showRegisterPanel();
           $('regGroup').value = row.dataset.name;
           $('regChannel').value = row.dataset.channel;
         });
       });
     } catch (e) {
-      $('discoveryBody').innerHTML = '<tr><td colspan="3" style="color:var(--accent)">' + esc(e.message || 'Failed') + '</td></tr>';
+      $('discoveryBody').innerHTML = '<tr><td colspan="3" style="color:#ef4444">' + esc(e.message || 'Failed') + '</td></tr>';
     }
   }
 
@@ -1824,11 +1869,6 @@
   $('journalRefreshBtn').addEventListener('click', loadJournal);
   $('historyRefreshBtn').addEventListener('click', loadHistory);
 
-  // Deselect group when clicking aggregate view buttons
-  $('aggView').addEventListener('click', e => {
-    if (e.target.closest('#registerPanel, #settingsPanel, #discoveryPanel')) return;
-  });
-
   // ─── Theme ───
   if (window.photon) {
     if (window.photon.theme === 'light') document.documentElement.classList.add('light');
@@ -1866,10 +1906,23 @@
         addActivity(data._activity.type || 'incoming', data._activity.group || '', data._activity.message || '');
       }
     });
+  }
 
+  // ─── Init: load data and start polling ───
+  if (claw) {
     loadStatus();
     loadHealth();
     loadTasks();
+
+    // Poll status every 10s
+    setInterval(() => {
+      loadStatus();
+    }, 10000);
+
+    // Poll health every 30s
+    setInterval(() => {
+      loadHealth();
+    }, 30000);
   }
 </script>
 </body>
