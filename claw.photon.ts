@@ -10,6 +10,17 @@ import { Photon } from '@portel/photon-core';
  * and send responses back. Uses channel .on() for event-driven
  * message handling with group and trigger filtering.
  *
+ * ## UI Promises
+ *
+ * - Pipeline status: running/stopped indicator with start/stop controls (calls `start()`, `stop()`, `status()`)
+ * - Group list: registered groups with channel badges and config (calls `groups()`, `register()`, `unregister()`)
+ * - Group config editor: update triggers, agent settings per group (calls `configure()`)
+ * - Sender management: allow/deny phone numbers per group (calls `senders()`, `allow()`, `deny()`)
+ * - Message history: recent messages per group with sender info (calls `history()`, `clear()`)
+ * - Scheduled tasks: list, create, and cancel recurring agent runs (calls `tasks()`, `task()`, `cancel()`)
+ * - Health monitor: connection status for WhatsApp, Telegram, agent runner (calls `health()`)
+ * - Test console: inject synthetic messages for E2E testing (calls `inject()`)
+ *
  * @version 4.0.0
  * @icon 🦞
  * @tags orchestrator, whatsapp, telegram, chat, agent, claw
