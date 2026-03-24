@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lookout</title>
+  <style>
+    :root {
+      --bg: #0a0e1a;
+      --surface: rgba(15, 20, 35, 0.95);
+      --line: rgba(255,255,255,0.08);
+      --text: #e5e5e5;
+      --muted: rgba(255,255,255,0.4);
+      --accent: #67c7ff;
+      --pass: #4ade80;
+      --fail: #f87171;
+      --warn: #fbbf24;
+    }
+
+    * { box-sizing: border-box; margin: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Toolbar ── */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+
+    .toolbar .title { font-weight: 600; font-size: 14px; }
+    .toolbar .dot { width: 6px; height: 6px; background: var(--accent); border-radius: 50%; }
+    .toolbar .spacer { flex: 1; }
+    .toolbar .status { font-size: 12px; color: var(--muted); }
+
+    .tb-btn {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--line);
+      color: var(--text);
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: background 0.15s;
+    }
+    .tb-btn:hover { background: rgba(255,255,255,0.12); }
+    .tb-btn.primary { background: rgba(103,199,255,0.15); border-color: rgba(103,199,255,0.3); color: var(--accent); }
+
+    /* ── Main Layout ── */
+    .main {
+      flex: 1;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      overflow: hidden;
+    }
+
+    /* ── Filmstrip ── */
+    .filmstrip {
+      display: flex;
+      gap: 6px;
+      padding: 10px 16px;
+      overflow-x: auto;
+      background: rgba(0,0,0,0.3);
+      border-bottom: 1px solid var(--line);
+      flex-shrink: 0;
+      min-height: 70px;
+      align-items: center;
+    }
+
+    .filmstrip:empty::after {
+      content: 'No frames captured yet';
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .filmstrip .frame {
+      width: 100px;
+      height: 56px;
+      border-radius: 4px;
+      object-fit: cover;
+      border: 2px solid transparent;
+      cursor: pointer;
+      transition: border-color 0.15s, transform 0.15s;
+      flex-shrink: 0;
+    }
+
+    .filmstrip .frame:hover { border-color: rgba(255,255,255,0.3); transform: scale(1.05); }
+    .filmstrip .frame.active { border-color: var(--accent); }
+
+    /* ── Center Image ── */
+    .center-panel {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: auto;
+      padding: 16px;
+      position: relative;
+    }
+
+    .center-panel img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      border-radius: 6px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+    }
+
+    .center-panel .empty-state {
+      text-align: center;
+      color: var(--muted);
+    }
+
+    .center-panel .empty-state h3 { font-size: 18px; margin-bottom: 8px; color: var(--text); }
+    .center-panel .empty-state p { font-size: 13px; max-width: 400px; line-height: 1.6; }
+
+    /* View mode tabs */
+    .view-tabs {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      display: flex;
+      gap: 2px;
+      background: rgba(0,0,0,0.4);
+      border-radius: 6px;
+      padding: 2px;
+    }
+
+    .view-tab {
+      padding: 4px 12px;
+      border: none;
+      background: none;
+      color: var(--muted);
+      font-size: 11px;
+      cursor: pointer;
+      border-radius: 4px;
+      transition: all 0.15s;
+    }
+    .view-tab:hover { color: var(--text); }
+    .view-tab.active { background: rgba(255,255,255,0.1); color: var(--text); }
+
+    /* ── Bottom Panel (Analysis) ── */
+    .analysis-panel {
+      border-top: 1px solid var(--line);
+      background: var(--surface);
+      padding: 12px 16px;
+      font-size: 13px;
+      line-height: 1.6;
+      max-height: 200px;
+      overflow-y: auto;
+      flex-shrink: 0;
+    }
+
+    .analysis-panel:empty { display: none; }
+    .analysis-panel .label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 6px; }
+    .analysis-panel .content { white-space: pre-wrap; }
+
+    /* ── Issue badges ── */
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+    .badge.pass { background: rgba(74,222,128,0.15); color: var(--pass); }
+    .badge.fail { background: rgba(248,113,113,0.15); color: var(--fail); }
+    .badge.warn { background: rgba(251,191,36,0.15); color: var(--warn); }
+
+    /* ── Score display ── */
+    .score {
+      font-size: 28px;
+      font-weight: 700;
+      text-align: center;
+      margin: 8px 0;
+    }
+    .score.a { color: var(--pass); }
+    .score.b { color: var(--warn); }
+    .score.c { color: var(--fail); }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <span class="dot"></span>
+    <span class="title">Lookout</span>
+    <span class="spacer"></span>
+    <span class="status" id="status">Ready</span>
+  </div>
+
+  <div class="main">
+    <div class="filmstrip" id="filmstrip"></div>
+
+    <div class="center-panel" id="centerPanel">
+      <div class="view-tabs" id="viewTabs" style="display:none;">
+        <button class="view-tab active" data-view="trail">Trail</button>
+        <button class="view-tab" data-view="heatmap">Heatmap</button>
+        <button class="view-tab" data-view="frame">Frame</button>
+      </div>
+      <div class="empty-state">
+        <h3>Lookout</h3>
+        <p>Run a review, recording, or interaction test. Results will appear here with frames, diff trails, and AI analysis.</p>
+      </div>
+    </div>
+
+    <div class="analysis-panel" id="analysisPanel"></div>
+  </div>
+
+  <script>
+    const lookoutApp = window["lookout"];
+    let state = { frames: [], trailImage: null, heatmapImage: null, currentView: 'trail', analysis: '', issues: [] };
+
+    function parseMCP(raw) {
+      if (raw && raw.content && Array.isArray(raw.content)) {
+        const item = raw.content.find(c => c.type === "text" && c.text);
+        if (item) { try { return JSON.parse(item.text); } catch { return item.text; } }
+      }
+      return raw;
+    }
+
+    function renderFilmstrip() {
+      const el = document.getElementById('filmstrip');
+      if (!state.frames.length) { el.innerHTML = ''; return; }
+      el.innerHTML = state.frames.map((f, i) =>
+        `<img class="frame ${i === state.selectedFrame ? 'active' : ''}" src="file://${f}" data-idx="${i}" loading="lazy">`
+      ).join('');
+      el.querySelectorAll('.frame').forEach(img => {
+        img.addEventListener('click', () => {
+          state.selectedFrame = parseInt(img.dataset.idx);
+          state.currentView = 'frame';
+          render();
+        });
+      });
+    }
+
+    function renderCenter() {
+      const panel = document.getElementById('centerPanel');
+      const tabs = document.getElementById('viewTabs');
+      let imgSrc = null;
+
+      if (state.currentView === 'trail' && state.trailImage) {
+        imgSrc = state.trailImage;
+      } else if (state.currentView === 'heatmap' && state.heatmapImage) {
+        imgSrc = state.heatmapImage;
+      } else if (state.currentView === 'frame' && state.frames.length) {
+        const idx = state.selectedFrame ?? 0;
+        imgSrc = state.frames[idx];
+      } else if (state.reviewImage) {
+        imgSrc = state.reviewImage;
+      }
+
+      if (imgSrc) {
+        const existingImg = panel.querySelector('img');
+        const existingEmpty = panel.querySelector('.empty-state');
+        if (existingEmpty) existingEmpty.remove();
+
+        if (existingImg) {
+          existingImg.src = 'file://' + imgSrc;
+        } else {
+          const img = document.createElement('img');
+          img.src = 'file://' + imgSrc;
+          panel.appendChild(img);
+        }
+        tabs.style.display = state.frames.length > 0 ? 'flex' : 'none';
+      }
+
+      // Update tab active state
+      tabs.querySelectorAll('.view-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.view === state.currentView);
+      });
+    }
+
+    function renderAnalysis() {
+      const panel = document.getElementById('analysisPanel');
+      if (!state.analysis && !state.issues.length) { panel.innerHTML = ''; return; }
+
+      let html = '';
+      if (state.score !== undefined && state.score !== null) {
+        const grade = state.score >= 90 ? 'A' : state.score >= 75 ? 'B' : 'C';
+        html += `<div class="score ${grade.toLowerCase()}">${state.score}/100</div>`;
+      }
+
+      if (state.issues.length) {
+        html += '<div class="label">Issues</div>';
+        for (const issue of state.issues) {
+          const cls = issue.severity === 'critical' ? 'fail' : issue.severity === 'warning' ? 'warn' : 'pass';
+          html += `<div style="margin:4px 0;"><span class="badge ${cls}">${issue.severity}</span> <strong>${issue.category}</strong> — ${issue.location}<br><span style="color:var(--muted);">${issue.description}</span></div>`;
+        }
+      }
+
+      if (state.analysis) {
+        html += `<div class="label" style="margin-top:8px;">Analysis</div>`;
+        html += `<div class="content">${state.analysis}</div>`;
+      }
+
+      panel.innerHTML = html;
+    }
+
+    function render() {
+      renderFilmstrip();
+      renderCenter();
+      renderAnalysis();
+    }
+
+    // View tab clicks
+    document.getElementById('viewTabs').addEventListener('click', (e) => {
+      if (e.target.classList.contains('view-tab')) {
+        state.currentView = e.target.dataset.view;
+        render();
+      }
+    });
+
+    // Bridge
+    if (lookoutApp) {
+      window.photon?.onResult?.((raw) => {
+        const data = parseMCP(raw);
+        if (!data || typeof data === 'string') {
+          // Markdown result — show in analysis
+          state.analysis = data || '';
+          render();
+          return;
+        }
+
+        // Record result
+        if (data.frames) {
+          state.frames = data.frames;
+          state.trailImage = data.trailImage || null;
+          state.selectedFrame = 0;
+          state.currentView = 'trail';
+          state.analysis = data.analysis || '';
+          document.getElementById('status').textContent =
+            `${data.frameCount} frames · ${data.duration}s · ${data.fps} fps`;
+        }
+
+        // Review result
+        if (data.issues) {
+          state.issues = data.issues;
+          state.score = data.score;
+          state.reviewImage = data.image || null;
+        }
+
+        // Validate result
+        if (data.results) {
+          state.analysis = data.results.map(r => {
+            const icon = r.status === 'PASS' ? '✅' : r.status === 'FAIL' ? '❌' : '❓';
+            return `${icon} ${r.promise}: ${r.evidence || ''}`;
+          }).join('\n');
+        }
+
+        render();
+      });
+    }
+
+    render();
+  </script>
+</body>
+</html>
