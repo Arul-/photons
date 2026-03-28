@@ -196,18 +196,24 @@ delete({ id }) { ... }   // confirmation required
 /** @locked */
 transfer({ to }) { ... } // one caller at a time
 
-/** @auth required */
-admin() { ... }           // OAuth, this.caller.id
+/** @audience user */
+dashboard() { ... }       // human eyes only
+
+/** @audience assistant */
+context() { ... }         // agent eyes only
 \`\`\`
+
+**No \`@audience\`? Both see it. Specify one? Exclusive.**
 
 | Tag | Beam (Human) | MCP (Agent) |
 |-----|-------------|-------------|
 | \`@readOnly\` | Instant result | Auto-approved |
 | \`@destructive\` | Confirm dialog | Approval required |
 | \`@locked\` | Waits for turn | Serialized access |
-| \`@auth\` | Browser SSO | MCP token flow |
+| \`@audience user\` | Sees the result | Result hidden |
+| \`@audience assistant\` | Result hidden | Sees the result |
 
-One annotation. Two audiences. Consistent behavior.
+One annotation. Two audiences. Full control over who sees what.
 
 ---
 
@@ -223,16 +229,42 @@ async *deploy() {
 }
 \`\`\`
 
-**\`yield\` = live update. \`return\` = final result.**
+**Three real-time primitives:**
 
-| Surface | Behavior |
-|---------|----------|
-| CLI | Prints each yield as it arrives |
-| Beam | Renders live progress bar |
-| MCP | Streams via SSE notifications |
-| AG-UI | Maps yields to standard events |
+| Primitive | What It Does |
+|-----------|-------------|
+| \`yield\` | Stream progress — each yield is a live update |
+| \`this.render()\` | Push formatted output mid-execution |
+| \`this.emit()\` | Fire named events to all connected clients |
 
-Plus: \`this.emit('event', data)\` pushes to all connected clients.
+| Surface | How It Arrives |
+|---------|---------------|
+| CLI | Printed line by line as it streams |
+| Beam | Live progress bar / re-rendered UI |
+| MCP | SSE notification stream |
+| AG-UI | Mapped to standard event types |
+
+---
+
+# Standards We Stand On
+
+Every standard adopted is a door opened.
+
+| Standard | What It Unlocks |
+|----------|----------------|
+| **MCP** (stdio + Streamable HTTP) | Claude Desktop, Cursor, Windsurf, any MCP client |
+| **MCP Apps** (SEP-1865) | Custom UI rendering inside Claude Desktop, ChatGPT |
+| **AG-UI Protocol** | CopilotKit, LangGraph, CrewAI, Google ADK integration |
+| **A2A** (Agent-to-Agent) | Google A2A orchestrators, multi-agent discovery |
+| **OAuth 2.1 + PKCE** | Google, GitHub, Microsoft — zero-config auth |
+| **RFC 9728** | Protected Resource Metadata — standard OAuth discovery |
+| **Server Cards** | \`/.well-known/mcp-server\` — discover without connecting |
+| **Agent Cards** | \`/.well-known/agent.json\` — A2A agent discovery |
+| **OpenTelemetry GenAI** | Jaeger, Zipkin, Datadog, Grafana — opt-in tracing |
+| **JSON Patch** (RFC 6902) | Efficient state deltas for real-time sync |
+
+**One photon. Discoverable by agents. Usable by humans.**
+**Every protocol is a new surface your code runs on — for free.**
 
 ---
 
