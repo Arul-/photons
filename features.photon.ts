@@ -31,6 +31,7 @@ export default class Features {
 | \`@dependencies\` | npm packages auto-installed |
 | \`@photon\` | Another photon injected |
 | \`@mcp\` | MCP server wired in |
+| \`@auth\` | OAuth 2.1, \`this.caller\` |
 | \`@ui\` | Custom HTML template linked |
 
 |||
