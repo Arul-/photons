@@ -48,6 +48,8 @@ export default class Features {
 
 # Single File, Full Stack
 
+<!-- cols: 2 -->
+
 \`\`\`typescript
 export default class Todo {
   private items = [];
@@ -60,16 +62,21 @@ export default class Todo {
 }
 \`\`\`
 
+|||
+
 **One file. Three interfaces. Zero config.**
 
 | Surface | Command |
 |---------|---------|
 | CLI | \`photon cli todo list\` |
-| MCP Server | STDIO or SSE — any AI client connects |
-| Web UI | \`photon beam\` → auto-generated forms & rendering |
+| MCP Server | STDIO or SSE — any AI client |
+| Web UI | \`photon beam\` → auto UI |
 
-Same class. Same methods. Three completely different surfaces.
-No server setup. No route definitions. No frontend code.
+Same class. Same methods.
+Three completely different surfaces.
+
+No server setup. No route definitions.
+No frontend code.
 
 ---
 
@@ -96,6 +103,8 @@ Same data. Every surface gets the right rendering.
 
 # Resilience Without Code
 
+<!-- cols: 2 -->
+
 \`\`\`typescript
 /**
  * @cached 5m
@@ -109,17 +118,22 @@ status() {
 }
 \`\`\`
 
-**Five behaviors. Zero lines of implementation.**
+|||
+
+**Five behaviors. Zero implementation.**
 
 The runtime wraps your method in a middleware pipeline:
 
 \`timeout → retry → circuit breaker → cache → fallback\`
 
-You write the happy path. Tags handle everything else.
+You write the happy path.
+Tags handle everything else.
 
 ---
 
 # State That Survives
+
+<!-- cols: 2 -->
 
 \`\`\`typescript
 /** @stateful */
@@ -133,18 +147,23 @@ export default class Notes {
 }
 \`\`\`
 
+|||
+
 | Capability | How |
 |-----------|-----|
-| Persisted to disk | Kill the process, restart — state is there |
-| Shared across clients | CLI, Beam, MCP all see the same instance |
+| Persisted to disk | Kill, restart — state is there |
+| Shared across clients | CLI, Beam, MCP see the same data |
 | Key-value store | \`this.memory.set()\` for complex data |
-| Named instances | Multiple isolated copies of one photon |
+| Named instances | Multiple isolated copies |
 
-No database. No setup. Add \`@stateful\` and state just works.
+No database. No setup.
+Add \`@stateful\` and state just works.
 
 ---
 
 # Composition
+
+<!-- cols: 2 -->
 
 \`\`\`typescript
 /**
@@ -153,7 +172,10 @@ No database. No setup. Add \`@stateful\` and state just works.
  * @dependencies axios@^1.0.0
  */
 export default class Dashboard {
-  constructor(private billing: any, private github: any) {}
+  constructor(
+    private billing: any,
+    private github: any
+  ) {}
 
   async overview() {
     const revenue = await this.billing.summary();
@@ -163,48 +185,61 @@ export default class Dashboard {
 }
 \`\`\`
 
+|||
+
 **Constructor injection resolves everything:**
 
 | Tag | Resolved To |
 |-----|------------|
-| \`@photon\` | Loaded from marketplace, wired as instance |
-| \`@mcp\` | MCP server connected, proxied as object |
-| \`@dependencies\` | npm packages installed on first run |
-| \`@cli\` | System tool — blocks load if missing |
+| \`@photon\` | Loaded from marketplace |
+| \`@mcp\` | MCP server proxied as object |
+| \`@dependencies\` | npm packages auto-installed |
+| \`@cli\` | System tool — blocks if missing |
 
 ---
 
 # Human + Agent, Same Surface
 
+<!-- cols: 2 -->
+
 \`\`\`typescript
 /** @readOnly */
-inventory() { ... }       // auto-approved
+inventory() { ... }
+// auto-approved
 
 /** @destructive */
-delete({ id }) { ... }    // confirmation required
+delete({ id }) { ... }
+// confirmation required
 
 /** @audience user */
-dashboard() { ... }        // human eyes only
+dashboard() { ... }
+// human eyes only
 
 /** @audience assistant */
-context() { ... }          // agent eyes only
+context() { ... }
+// agent eyes only
 \`\`\`
+
+|||
 
 **No \`@audience\`? Both see it. Specify one? Exclusive.**
 
-| Tag | Beam (Human) | MCP (Agent) |
-|-----|-------------|-------------|
-| \`@readOnly\` | Instant result | Auto-approved |
-| \`@destructive\` | Confirm dialog | Approval required |
-| \`@locked\` | Waits for turn | Serialized access |
-| \`@audience user\` | Sees the result | Result hidden |
-| \`@audience assistant\` | Result hidden | Sees the result |
+| Tag | Human | Agent |
+|-----|-------|-------|
+| \`@readOnly\` | Instant | Auto-approved |
+| \`@destructive\` | Confirm | Approval required |
+| \`@locked\` | Waits | Serialized |
+| \`@audience user\` | Sees it | Hidden |
+| \`@audience assistant\` | Hidden | Sees it |
 
-One annotation. Two audiences. Full control over who sees what.
+One annotation. Two audiences.
+Full control over who sees what.
 
 ---
 
 # Real-Time Streaming
+
+<!-- cols: 2 -->
 
 \`\`\`typescript
 async *deploy() {
@@ -216,20 +251,22 @@ async *deploy() {
 }
 \`\`\`
 
+|||
+
 **Three real-time primitives:**
 
 | Primitive | What It Does |
 |-----------|-------------|
-| \`yield\` | Stream progress — each yield is a live update |
-| \`this.render()\` | Push formatted output mid-execution |
-| \`this.emit()\` | Fire named events to all connected clients |
+| \`yield\` | Live update per step |
+| \`this.render()\` | Push formatted output |
+| \`this.emit()\` | Named events to all clients |
 
 | Surface | How It Arrives |
 |---------|---------------|
-| CLI | Printed line by line as it streams |
-| Beam | Live progress bar / re-rendered UI |
+| CLI | Printed line by line |
+| Beam | Live progress bar |
 | MCP | SSE notification stream |
-| AG-UI | Mapped to standard event types |
+| AG-UI | Standard event types |
 
 ---
 
@@ -257,17 +294,23 @@ Every standard adopted is a door opened.
 
 # The Runtime Layer
 
+<!-- cols: 2 -->
+
 \`\`\`
 Standard MCP:
-  Server → Raw JSON → Client must parse, transform, render
+  Server → Raw JSON → Client
+  (parse, transform, render)
 
 Photon:
-  Server → Runtime → Typed Data → Auto UI
+  Server → Runtime → Auto UI
               ↓
-    middleware · state · events · formats · safety
+    middleware · state · events
+    formats · safety · sync
 \`\`\`
 
-**Between your code and the client, the runtime provides:**
+|||
+
+**Between your code and the client:**
 
 | Layer | Capability |
 |-------|-----------|
