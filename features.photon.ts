@@ -41,8 +41,9 @@ export default class Features {
 | \`@cached 5m\` | Results memoized with TTL |
 | \`@retryable 3 1s\` | Auto-retry on failure with backoff |
 | \`@locked\` | Distributed mutex across processes |
+| \`@scheduled 0 9 * * *\` | Cron job — runs without a client |
 
-*...and 30+ more — see documentation*
+*...and 20+ more — see documentation*
 
 ---
 
@@ -267,6 +268,45 @@ async *deploy() {
 | Beam | Live progress bar |
 | MCP | SSE notification stream |
 | AG-UI | Standard event types |
+
+---
+
+# Background & Scheduling
+
+<!-- cols: 2 -->
+
+\`\`\`typescript
+/** @scheduled 0 9 * * 1-5 */
+async dailyDigest() {
+  const data = await this.gather();
+  await this.memory.set('report', data);
+}
+
+/** @webhook stripe */
+async handlePayment({ event }) {
+  // POST /webhook/stripe → here
+}
+
+/** @async */
+async generate({ quarter }) {
+  // Returns task ID immediately
+  // Client polls for completion
+}
+\`\`\`
+
+|||
+
+**The daemon runs jobs without a client.**
+
+| Tag | What Happens |
+|-----|-------------|
+| \`@scheduled\` | Cron job — fires on time, every time |
+| \`@webhook\` | HTTP POST endpoint auto-registered |
+| \`@async\` | Returns task ID, runs in background |
+
+No crontab. No separate worker process.
+No webhook server to deploy.
+Tags turn methods into infrastructure.
 
 ---
 
