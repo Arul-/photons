@@ -21,29 +21,33 @@ export default class Features {
     return `
 # Intent as Metadata
 
+<!-- cols: 2 -->
+
 **Class-Level** — shape the photon
 
 | Tag | What Happens |
 |-----|-------------|
-| \`@stateful\` | State persists to disk, survives restarts |
-| \`@dependencies axios@^1.0\` | npm packages auto-installed on first run |
-| \`@photon billing\` | Another photon injected as constructor param |
-| \`@mcp github\` | MCP server wired into constructor |
-| \`@auth required\` | Full OAuth 2.1, \`this.caller\` populated |
+| \`@stateful\` | Persists to disk, survives restarts |
+| \`@dependencies\` | npm packages auto-installed |
+| \`@photon\` | Another photon injected |
+| \`@mcp\` | MCP server wired in |
+| \`@ui\` | Custom HTML template linked |
+
+|||
 
 **Method-Level** — shape the tool
 
 | Tag | What Happens |
 |-----|-------------|
-| \`@format table\` | Output auto-rendered (50+ formats) |
-| \`@readOnly\` | Agent auto-approves — no user prompt |
-| \`@destructive\` | Requires explicit confirmation |
-| \`@cached 5m\` | Results memoized with TTL |
-| \`@retryable 3 1s\` | Auto-retry on failure with backoff |
-| \`@locked\` | Distributed mutex across processes |
-| \`@scheduled 0 9 * * *\` | Cron job — runs without a client |
+| \`@format\` | Auto-rendered (50+ formats) |
+| \`@readOnly\` | Agent auto-approves |
+| \`@destructive\` | Requires confirmation |
+| \`@cached\` | Results memoized with TTL |
+| \`@retryable\` | Auto-retry on failure |
+| \`@locked\` | Distributed mutex |
+| \`@scheduled\` | Cron job, no client needed |
 
-*...and 20+ more — see documentation*
+*...and 20+ more*
 
 ---
 
