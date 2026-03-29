@@ -21,8 +21,6 @@ export default class Features {
     return `
 # Intent as Metadata
 
-One tag. Automatic behavior. Zero boilerplate.
-
 **Class-Level** — shape the photon
 
 | Tag | What Happens |
@@ -32,8 +30,6 @@ One tag. Automatic behavior. Zero boilerplate.
 | \`@photon billing\` | Another photon injected as constructor param |
 | \`@mcp github\` | MCP server wired into constructor |
 | \`@auth required\` | Full OAuth 2.1, \`this.caller\` populated |
-| \`@ui dashboard\` | Custom HTML template linked to methods |
-| \`@worker\` | Crash-isolated in its own thread |
 
 **Method-Level** — shape the tool
 
@@ -44,12 +40,9 @@ One tag. Automatic behavior. Zero boilerplate.
 | \`@destructive\` | Requires explicit confirmation |
 | \`@cached 5m\` | Results memoized with TTL |
 | \`@retryable 3 1s\` | Auto-retry on failure with backoff |
-| \`@timeout 30s\` | Hard execution limit |
 | \`@locked\` | Distributed mutex across processes |
-| \`@scheduled 0 0 * * *\` | Cron job — runs without a client |
-| \`@webhook stripe\` | HTTP POST endpoint auto-registered |
 
-*...and 20+ more — see documentation*
+*...and 30+ more — see documentation*
 
 ---
 
@@ -160,10 +153,7 @@ No database. No setup. Add \`@stateful\` and state just works.
  * @dependencies axios@^1.0.0
  */
 export default class Dashboard {
-  constructor(
-    private billing: any,
-    private github: any
-  ) {}
+  constructor(private billing: any, private github: any) {}
 
   async overview() {
     const revenue = await this.billing.summary();
@@ -188,19 +178,16 @@ export default class Dashboard {
 
 \`\`\`typescript
 /** @readOnly */
-inventory() { ... }      // auto-approved
+inventory() { ... }       // auto-approved
 
 /** @destructive */
-delete({ id }) { ... }   // confirmation required
-
-/** @locked */
-transfer({ to }) { ... } // one caller at a time
+delete({ id }) { ... }    // confirmation required
 
 /** @audience user */
-dashboard() { ... }       // human eyes only
+dashboard() { ... }        // human eyes only
 
 /** @audience assistant */
-context() { ... }         // agent eyes only
+context() { ... }          // agent eyes only
 \`\`\`
 
 **No \`@audience\`? Both see it. Specify one? Exclusive.**
