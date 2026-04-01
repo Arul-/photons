@@ -1,19 +1,12 @@
-# Uptime Monitor
+# Uptime Monitor Workflow Monitors website availability and sends alerts This workflow demonstrates:
 
-Uptime Monitor Workflow Monitors website availability and sends alerts
+HTTP health checks via fetch - Multi-channel notifications (Slack + optional Telegram) - State persistence for incident tracking
 
-## 📋 Overview
+> **3 tools** · Workflow Photon · v1.18.0 · MIT
 
-**Version:** 1.4.1
-**Author:** Unknown
-**License:** MIT
+**Platform Features:** `generator` `elicitation` `streaming` `channels`
 
 ## ⚙️ Configuration
-
-### Environment Variables
-
-
-
 
 No configuration required.
 
@@ -22,22 +15,17 @@ No configuration required.
 
 ## 🔧 Tools
 
-This photon provides **3** tools:
 
-
-### `check`
+### `check` ⚡
 
 Check multiple URLs and alert on failures
 
 
-**Parameters:**
-
-
-- **`urls`** (any) - URLs to monitor
-
-- **`channel`** (any) - Slack channel for alerts
-
-- **`timeout`** (any) - Request timeout in ms
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `urls` | string[] | Yes | URLs to monitor |
+| `channel` | string | Yes | Slack channel for alerts |
+| `timeout` | number | No | Request timeout in ms |
 
 
 
@@ -46,7 +34,7 @@ Check multiple URLs and alert on failures
 ---
 
 
-### `setup`
+### `setup` ⚡
 
 Interactive setup to configure monitoring
 
@@ -71,48 +59,58 @@ Get uptime statistics from historical data
 
 
 
+## 🏗️ Architecture
+
+```mermaid
+flowchart TD
+    subgraph uptime_monitor["📦 Uptime Monitor"]
+        START([▶ Start])
+        N0[📢 Checking ${params.urls.leng...]
+        START --> N0
+        N1[📢 Checking: ${url}]
+        N0 --> N1
+        N2[📝 log]
+        N1 --> N2
+        N3[📝 log]
+        N2 --> N3
+        N4[📝 log]
+        N3 --> N4
+        N5[📝 log]
+        N4 --> N5
+        N6[⏳ progress]
+        N5 --> N6
+        N7[⏳ progress]
+        N6 --> N7
+        N8{✏️ text}
+        N7 --> N8
+        N9{✏️ text}
+        N8 --> N9
+        N10{🙋 confirm}
+        N9 --> N10
+        N11([❌ Cancelled])
+        N10 -->|No| N11
+        N10 -->|Yes| N12
+        N12[Continue]
+        SUCCESS([✅ Success])
+        N12 --> SUCCESS
+    end
+```
+
+
 ## 📥 Usage
 
-### Install Photon CLI
-
 ```bash
-npm install -g @portel/photon
-```
+# Install from marketplace
+photon add uptime-monitor
 
-### Run This Photon
-
-**Option 1: Run directly from file**
-
-```bash
-# Clone/download the photon file
-photon mcp ./uptime-monitor.photon.ts
-```
-
-**Option 2: Install to ~/.photon/ (recommended)**
-
-```bash
-# Copy to photon directory
-cp uptime-monitor.photon.ts ~/.photon/
-
-# Run by name
-photon mcp uptime-monitor
-```
-
-**Option 3: Use with Claude Desktop**
-
-```bash
-# Generate MCP configuration
-photon mcp uptime-monitor --config
-
-# Add the output to ~/Library/Application Support/Claude/claude_desktop_config.json
+# Get MCP config for your client
+photon info uptime-monitor --mcp
 ```
 
 ## 📦 Dependencies
 
+No external dependencies.
 
-No external dependencies required.
+---
 
-
-## 📄 License
-
-MIT • Version 1.4.1
+MIT · v1.18.0

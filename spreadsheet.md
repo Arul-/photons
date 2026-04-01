@@ -2,9 +2,9 @@
 
 Spreadsheet — CSV-backed spreadsheet with formulas A spreadsheet engine that works on plain CSV files. Formulas (=SUM, =AVG, etc.) are stored directly in CSV cells and evaluated at runtime. Named instances map to CSV files: `_use('budget')` → `budget.csv` in your spreadsheets folder. Pass a full path to open any CSV: `_use('/path/to/data.csv')`.
 
-> **24 tools** · API Photon · v1.1.0 · MIT
+> **37 tools** · API Photon · v1.1.0 · MIT
 
-**Platform Features:** `custom-ui` `stateful`
+**Platform Features:** `custom-ui` `stateful` `dashboard`
 
 ## ⚙️ Configuration
 
@@ -17,11 +17,24 @@ No configuration required.
 | Method | Description |
 |--------|-------------|
 | `main` | Open spreadsheet UI |
+| `list_tables` | List all tables (CSV files) in the spreadsheets folder |
+| `list_records` | View records (Airtable-compatible) |
+| `lookup` | Lookup a value from another table. |
+| `get_record` | Get a single record by its row number |
+| `create_record` | Create a new record (Airtable-compatible) |
+| `update_record` | Update an existing record (Airtable-compatible) |
+| `delete_record` | Delete a record (Airtable-compatible) |
+| `search_records` | Search for records (Airtable-compatible) |
 | `view` | View the spreadsheet grid. |
 | `get` | Get a cell value. |
 | `set` | Set a cell value or formula. |
 | `add` | Add a row of data. |
 | `remove` | Remove a row |
+| `removeColumn` | Remove a column |
+| `insertRow` | Insert a row at a specific position |
+| `insertColumn` | Insert a column at a specific position |
+| `upsert` | Update or insert a row (Database Upsert). |
+| `search` | Fuzzy search across columns. |
 | `update` | Update fields in a row |
 | `query` | Query rows by condition. |
 | `sort` | Sort by column. |
@@ -56,6 +69,135 @@ Open spreadsheet UI
 ---
 
 
+### `list_tables`
+
+List all tables (CSV files) in the spreadsheets folder
+
+
+
+
+
+---
+
+
+### `list_records`
+
+View records (Airtable-compatible)
+
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `maxRecords` | number | No | Max records to return (default 100) |
+| `offset` | number | No | Row offset for pagination |
+| `filterByFormula` | string | No | Optional formula to filter records (e.g. "{Age} > 25") |
+
+
+
+
+
+---
+
+
+### `lookup`
+
+Lookup a value from another table. Mimics the relational "Lookup" field in Airtable/Google Sheets.
+
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `table` | string | Yes | Other table name (e.g. "Products") |
+| `matchField` | string | Yes | Field in the other table to match against (e.g. "SKU") |
+| `matchValue` | string | Yes | Value to search for (e.g. "A101") |
+| `resultField` | string | Yes | Field to return from the matching row (e.g. "Price") |
+
+
+
+
+
+---
+
+
+### `get_record`
+
+Get a single record by its row number
+
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `recordId` | number | Yes | Row number (1-indexed) |
+
+
+
+
+
+---
+
+
+### `create_record`
+
+Create a new record (Airtable-compatible)
+
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `fields` | Record<string | Yes | Key-value pairs for the new record |
+
+
+
+
+
+---
+
+
+### `update_record`
+
+Update an existing record (Airtable-compatible)
+
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `recordId` | number | Yes | Row number (1-indexed) |
+| `fields` | Record<string | Yes | Key-value pairs to update |
+
+
+
+
+
+---
+
+
+### `delete_record`
+
+Delete a record (Airtable-compatible)
+
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `recordId` | number | Yes | Row number (1-indexed) |
+
+
+
+
+
+---
+
+
+### `search_records`
+
+Search for records (Airtable-compatible)
+
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | Yes | Text to search for |
+
+
+
+
+
+---
+
+
 ### `view`
 
 View the spreadsheet grid. Returns the full spreadsheet or a specific range as a formatted table.
@@ -64,6 +206,8 @@ View the spreadsheet grid. Returns the full spreadsheet or a specific range as a
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `range` | any | Yes | Optional cell range to view (e.g., "A1:D10") |
+| `offset` | number | No | Row offset for pagination |
+| `limit` | number } | No | Max rows to return (defaults to settings.pageSize) |
 
 
 
@@ -129,6 +273,91 @@ Remove a row
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `row` | number | Yes | Row number to remove (1-indexed) |
+
+
+
+
+
+---
+
+
+### `removeColumn`
+
+Remove a column
+
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `column` | string | Yes | Column letter or header name to remove |
+
+
+
+
+
+---
+
+
+### `insertRow`
+
+Insert a row at a specific position
+
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `row` | number | Yes | Row number to insert before (1-indexed) |
+| `values` | Record<string | No | Optional: Key-value pairs for the new row |
+
+
+
+
+
+---
+
+
+### `insertColumn`
+
+Insert a column at a specific position
+
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `column` | string | Yes | Column letter or header name to insert before |
+| `name` | string | Yes | Name for the new column |
+
+
+
+
+
+---
+
+
+### `upsert`
+
+Update or insert a row (Database Upsert). Finds a row matching the `search` criteria. If found, updates it with `values`. If not found, adds a new row with `values`.
+
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `search` | Record<string | Yes | Key-value pairs to match an existing row (e.g., {"ID": "123"}) |
+| `values` | Record<string | Yes | Key-value pairs to set in the row |
+
+
+
+
+
+---
+
+
+### `search`
+
+Fuzzy search across columns. Finds rows containing the query string in any of the specified columns. Uses streaming generator for memory efficiency on large files.
+
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | Yes | Search string |
+| `columns` | string[] | No | Optional: array of column names to search (searches all if omitted) |
+| `limit` | number | No | Max results to return |
 
 
 
@@ -456,52 +685,78 @@ flowchart LR
         PHOTON((🎯))
         T0[🔧 main]
         PHOTON --> T0
-        T1[🔧 view]
+        T1[📖 list_tables]
         PHOTON --> T1
-        T2[📖 get]
+        T2[📖 list_records]
         PHOTON --> T2
-        T3[✏️ set]
+        T3[🔧 lookup]
         PHOTON --> T3
-        T4[✏️ add]
+        T4[📖 get_record]
         PHOTON --> T4
-        T5[🗑️ remove]
+        T5[✏️ create_record]
         PHOTON --> T5
-        T6[🔄 update]
+        T6[🔄 update_record]
         PHOTON --> T6
-        T7[📖 query]
+        T7[🗑️ delete_record]
         PHOTON --> T7
-        T8[🔧 sort]
+        T8[📖 search_records]
         PHOTON --> T8
-        T9[🔧 fill]
+        T9[🔧 view]
         PHOTON --> T9
-        T10[🔧 schema]
+        T10[📖 get]
         PHOTON --> T10
-        T11[🔧 resize]
+        T11[✏️ set]
         PHOTON --> T11
-        T12[🔧 ingest]
+        T12[✏️ add]
         PHOTON --> T12
-        T13[🔧 dump]
+        T13[🗑️ remove]
         PHOTON --> T13
-        T14[🗑️ clear]
+        T14[🗑️ removeColumn]
         PHOTON --> T14
-        T15[🔧 rename]
+        T15[✏️ insertRow]
         PHOTON --> T15
-        T16[🔧 format]
+        T16[✏️ insertColumn]
         PHOTON --> T16
-        T17[🔧 tail]
+        T17[🔧 upsert]
         PHOTON --> T17
-        T18[🔧 untail]
+        T18[📖 search]
         PHOTON --> T18
-        T19[📤 push]
+        T19[🔄 update]
         PHOTON --> T19
-        T20[🔧 sql]
+        T20[📖 query]
         PHOTON --> T20
-        T21[🔧 watch]
+        T21[🔧 sort]
         PHOTON --> T21
-        T22[🔧 unwatch]
+        T22[🔧 fill]
         PHOTON --> T22
-        T23[🔧 watches]
+        T23[🔧 schema]
         PHOTON --> T23
+        T24[🔧 resize]
+        PHOTON --> T24
+        T25[🔧 ingest]
+        PHOTON --> T25
+        T26[🔧 dump]
+        PHOTON --> T26
+        T27[🗑️ clear]
+        PHOTON --> T27
+        T28[🔧 rename]
+        PHOTON --> T28
+        T29[🔧 format]
+        PHOTON --> T29
+        T30[🔧 tail]
+        PHOTON --> T30
+        T31[🔧 untail]
+        PHOTON --> T31
+        T32[📤 push]
+        PHOTON --> T32
+        T33[🔧 sql]
+        PHOTON --> T33
+        T34[🔧 watch]
+        PHOTON --> T34
+        T35[🔧 unwatch]
+        PHOTON --> T35
+        T36[🔧 watches]
+        PHOTON --> T36
     end
 
     subgraph deps["Dependencies"]

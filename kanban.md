@@ -11,7 +11,7 @@ Kanban Board Photon Task management for humans and AI. Use named instances (`_us
 
 | Variable | Required | Type | Description |
 |----------|----------|------|-------------|
-| `KANBAN_PHOTON_BOARDDATA` | No | Board | No description available (default: `createEmptyBoard('default')`) |
+| `KANBAN_PHOTON_BOARDDATA` | No | Board | No description available |
 
 
 

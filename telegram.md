@@ -1,50 +1,85 @@
 # Telegram
 
-Send messages via Telegram Bot API Like n8n's Telegram node - notifications and bot automation
+Max age for queued messages before they're dropped on flush (1 hour)
 
-## 📋 Overview
+> **12 tools** · API Photon · v1.0.0 · MIT
 
-**Version:** 1.4.1
-**Author:** Unknown
-**License:** MIT
+**Platform Features:** `stateful` `channels`
 
 ## ⚙️ Configuration
 
-### Environment Variables
-
-
-- **`TELEGRAM_BOTTOKEN`** [REQUIRED]
-  - Type: string
-  - Description: No description available
-  
+No configuration required.
 
 
 
+## 📋 Quick Reference
 
+| Method | Description |
+|--------|-------------|
+| `connect` | Connect to Telegram with a bot token from BotFather. |
+| `disconnect` | Disconnect from Telegram. |
+| `status` | Connection and bot status. |
+| `send` | Send a text message to a chat. |
+| `edit` | Edit a previously sent message. |
+| `reply` | Reply to a specific message (quoted reply). |
+| `react` | React to a message with an emoji. |
+| `media` | Send media (photo, video, audio, or document). |
+| `typing` | Set typing indicator for a chat. |
+| `pending` | Return and clear buffered inbound messages. |
+| `groups` | List known chats (groups and DMs discovered from incoming messages). |
+| `logout` | Remove saved bot token and disconnect. |
 
 
 ## 🔧 Tools
 
-This photon provides **12** tools:
+
+### `connect`
+
+Connect to Telegram with a bot token from BotFather. Saves the token for automatic reconnection on restart.
+
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `token` | string | Yes | Bot token from @BotFather (e.g. `"123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"`) |
+
+
+
+
+
+---
+
+
+### `disconnect`
+
+Disconnect from Telegram. Stops receiving messages.
+
+
+
+
+
+---
+
+
+### `status`
+
+Connection and bot status.
+
+
+
+
+
+---
 
 
 ### `send`
 
-Send a text message
+Send a text message to a chat. Supports markdown formatting — converted to Telegram HTML automatically.
 
 
-**Parameters:**
-
-
-- **`chatId`** (any) - Chat ID or @username
-
-- **`text`** (any) - Message text (supports Markdown or HTML)
-
-- **`parseMode`** (any) - Parse mode: Markdown, MarkdownV2, or HTML
-
-- **`disableNotification`** (any) - Send silently
-
-- **`replyToMessageId`** (any) - Message ID to reply to
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `chat` | string | Yes | Chat name or ID [choice-from: groups.name] |
+| `text` | string | Yes | Message text (supports Markdown) |
 
 
 
@@ -53,21 +88,16 @@ Send a text message
 ---
 
 
-### `sendPhoto`
+### `edit`
 
-Send a photo
-
-
-**Parameters:**
+Edit a previously sent message.
 
 
-- **`chatId`** (any) - Chat ID or @username
-
-- **`photo`** (any) - Photo URL or file_id
-
-- **`caption`** (any) - Photo caption
-
-- **`parseMode`** (any) - Parse mode for caption
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `chat` | string | Yes | Chat name or ID [choice-from: groups.name] |
+| `messageId` | number | Yes | Message ID to edit |
+| `text` | string | Yes | New text (supports Markdown) |
 
 
 
@@ -76,19 +106,16 @@ Send a photo
 ---
 
 
-### `sendDocument`
+### `reply`
 
-Send a document/file
-
-
-**Parameters:**
+Reply to a specific message (quoted reply).
 
 
-- **`chatId`** (any) - Chat ID or @username
-
-- **`document`** (any) - Document URL or file_id
-
-- **`caption`** (any) - Document caption
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `chat` | string | Yes | Chat name or ID [choice-from: groups.name] |
+| `text` | string | Yes | Reply text (supports Markdown) |
+| `messageId` | number | Yes | Message ID to reply to |
 
 
 
@@ -97,19 +124,16 @@ Send a document/file
 ---
 
 
-### `sendLocation`
+### `react`
 
-Send a location
-
-
-**Parameters:**
+React to a message with an emoji.
 
 
-- **`chatId`** (any) - Chat ID or @username
-
-- **`latitude`** (any) - Latitude
-
-- **`longitude`** (any) - Longitude
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `chat` | string | Yes | Chat name or ID [choice-from: groups.name] |
+| `messageId` | number | Yes | Message ID to react to |
+| `emoji` | string | Yes | Emoji to react with (empty string to remove) (e.g. `"👍"`) |
 
 
 
@@ -118,23 +142,17 @@ Send a location
 ---
 
 
-### `sendPoll`
+### `media`
 
-Send a poll
-
-
-**Parameters:**
+Send media (photo, video, audio, or document).
 
 
-- **`chatId`** (any) - Chat ID or @username
-
-- **`question`** (any) - Poll question
-
-- **`options`** (any) - Poll options (2-10 options)
-
-- **`isAnonymous`** (any) - Is the poll anonymous
-
-- **`type`** (any) - Poll type: regular or quiz
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `chat` | string | Yes | Chat name or ID [choice-from: groups.name] |
+| `url` | string | Yes | File URL or Telegram file_id |
+| `type` | 'photo' | 'video' | 'audio' | 'document' | Yes | Media type [choice: photo, video, audio, document] |
+| `caption` | string | No | Optional caption |
 
 
 
@@ -143,23 +161,15 @@ Send a poll
 ---
 
 
-### `alert`
+### `typing`
 
-Send a formatted alert message
-
-
-**Parameters:**
+Set typing indicator for a chat. Telegram typing indicators auto-expire after ~5 seconds.
 
 
-- **`chatId`** (any) - Chat ID
-
-- **`level`** (any) - Alert level
-
-- **`title`** (any) - Alert title
-
-- **`message`** (any) - Alert message
-
-- **`details`** (any) - Additional details
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `chat` | string | Yes | Chat name or ID [choice-from: groups.name] |
+| `typing` | boolean | Yes | True to show typing (false is a no-op — Telegram auto-expires) |
 
 
 
@@ -168,25 +178,9 @@ Send a formatted alert message
 ---
 
 
-### `deployment`
+### `pending`
 
-Send a deployment notification
-
-
-**Parameters:**
-
-
-- **`chatId`** (any) - Chat ID
-
-- **`app`** (any) - Application name
-
-- **`version`** (any) - Version
-
-- **`environment`** (any) - Environment
-
-- **`status`** (any) - Deployment status
-
-- **`url`** (any) - Deployment URL
+Return and clear buffered inbound messages. If polling is idle (no subscribers), does a one-shot fetch from Telegram first.
 
 
 
@@ -195,26 +189,9 @@ Send a deployment notification
 ---
 
 
-### `getMe`
+### `groups`
 
-Get bot information
-
-
-
-
-
----
-
-
-### `getChat`
-
-Get chat information
-
-
-**Parameters:**
-
-
-- **`chatId`** (any) - Chat ID or @username
+List known chats (groups and DMs discovered from incoming messages). Note: Telegram Bot API has no "list all chats" endpoint — this index builds incrementally from received messages.
 
 
 
@@ -223,59 +200,9 @@ Get chat information
 ---
 
 
-### `getUpdates`
+### `logout`
 
-Get recent updates (incoming messages)
-
-
-**Parameters:**
-
-
-- **`offset`** (any) - Update offset
-
-- **`limit`** (any) - Maximum updates to return
-
-- **`timeout`** (any) - Long polling timeout in seconds
-
-
-
-
-
----
-
-
-### `deleteMessage`
-
-Delete a message
-
-
-**Parameters:**
-
-
-- **`chatId`** (any) - Chat ID
-
-- **`messageId`** (any) - Message ID to delete
-
-
-
-
-
----
-
-
-### `pinMessage`
-
-Pin a message
-
-
-**Parameters:**
-
-
-- **`chatId`** (any) - Chat ID
-
-- **`messageId`** (any) - Message ID to pin
-
-- **`disableNotification`** (any) - Don't notify members
+Remove saved bot token and disconnect. You'll need to call connect() again with a new token.
 
 
 
@@ -285,50 +212,65 @@ Pin a message
 
 
 
+
+
+## 🏗️ Architecture
+
+```mermaid
+flowchart LR
+    subgraph telegram["📦 Telegram"]
+        direction TB
+        PHOTON((🎯))
+        T0[🔌 connect]
+        PHOTON --> T0
+        T1[🔧 disconnect]
+        PHOTON --> T1
+        T2[🔧 status]
+        PHOTON --> T2
+        T3[📤 send]
+        PHOTON --> T3
+        T4[🔄 edit]
+        PHOTON --> T4
+        T5[🔧 reply]
+        PHOTON --> T5
+        T6[🔧 react]
+        PHOTON --> T6
+        T7[🔧 media]
+        PHOTON --> T7
+        T8[🔧 typing]
+        PHOTON --> T8
+        T9[🔧 pending]
+        PHOTON --> T9
+        T10[🔧 groups]
+        PHOTON --> T10
+        T11[🔧 logout]
+        PHOTON --> T11
+    end
+
+    subgraph deps["Dependencies"]
+        direction TB
+        NPM0[📚 sharp?]
+    end
+```
 
 
 ## 📥 Usage
 
-### Install Photon CLI
-
 ```bash
-npm install -g @portel/photon
-```
+# Install from marketplace
+photon add telegram
 
-### Run This Photon
-
-**Option 1: Run directly from file**
-
-```bash
-# Clone/download the photon file
-photon mcp ./telegram.photon.ts
-```
-
-**Option 2: Install to ~/.photon/ (recommended)**
-
-```bash
-# Copy to photon directory
-cp telegram.photon.ts ~/.photon/
-
-# Run by name
-photon mcp telegram
-```
-
-**Option 3: Use with Claude Desktop**
-
-```bash
-# Generate MCP configuration
-photon mcp telegram --config
-
-# Add the output to ~/Library/Application Support/Claude/claude_desktop_config.json
+# Get MCP config for your client
+photon info telegram --mcp
 ```
 
 ## 📦 Dependencies
 
 
-No external dependencies required.
+```
+sharp?
+```
 
+---
 
-## 📄 License
-
-MIT • Version 1.4.1
+MIT · v1.0.0

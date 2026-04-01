@@ -1,19 +1,11 @@
 # RSS Feed
 
-Read and parse RSS/Atom feeds Like n8n's RSS Read node - monitor blogs, news, and content feeds
+Read and parse RSS/Atom feeds Like n8n's RSS Read node - monitor blogs, news, and content feeds Perfect for: - Content aggregation - News monitoring - Blog post notifications - Podcast feed parsing
 
-## 📋 Overview
+> **5 tools** · API Photon · v1.18.0 · MIT
 
-**Version:** 1.4.1
-**Author:** Unknown
-**License:** MIT
 
 ## ⚙️ Configuration
-
-### Environment Variables
-
-
-
 
 No configuration required.
 
@@ -22,20 +14,16 @@ No configuration required.
 
 ## 🔧 Tools
 
-This photon provides **5** tools:
-
 
 ### `read`
 
 Read and parse an RSS/Atom feed
 
 
-**Parameters:**
-
-
-- **`url`** (any) - Feed URL to parse
-
-- **`limit`** (any, optional) - Maximum number of items to return
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `url` | string | Yes | Feed URL to parse |
+| `limit` | number | No | Maximum number of items to return |
 
 
 
@@ -49,12 +37,10 @@ Read and parse an RSS/Atom feed
 Get new items since a specific date
 
 
-**Parameters:**
-
-
-- **`url`** (any) - Feed URL
-
-- **`since`** (any) - ISO date string - only return items newer than this
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `url` | string | Yes | Feed URL |
+| `since` | string | Yes | ISO date string - only return items newer than this |
 
 
 
@@ -68,14 +54,11 @@ Get new items since a specific date
 Search feed items by keyword
 
 
-**Parameters:**
-
-
-- **`url`** (any) - Feed URL
-
-- **`query`** (any) - Search query (searches title and description)
-
-- **`limit`** (any) - Maximum results
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `url` | string | Yes | Feed URL |
+| `query` | string | Yes | Search query (searches title and description) |
+| `limit` | number | No | Maximum results |
 
 
 
@@ -89,12 +72,10 @@ Search feed items by keyword
 Monitor multiple feeds at once
 
 
-**Parameters:**
-
-
-- **`urls`** (any) - Array of feed URLs
-
-- **`limit`** (any) - Items per feed
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `urls` | string[] | Yes | Array of feed URLs |
+| `limit` | number | No | Items per feed |
 
 
 
@@ -108,10 +89,9 @@ Monitor multiple feeds at once
 Get feed metadata without items
 
 
-**Parameters:**
-
-
-- **`url`** (any) - Feed URL
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `url` | string | Yes | Feed URL |
 
 
 
@@ -123,48 +103,41 @@ Get feed metadata without items
 
 
 
+## 🏗️ Architecture
+
+```mermaid
+flowchart LR
+    subgraph rss_feed["📦 Rss Feed"]
+        direction TB
+        PHOTON((🎯))
+        T0[📖 read]
+        PHOTON --> T0
+        T1[📖 getNew]
+        PHOTON --> T1
+        T2[📖 search]
+        PHOTON --> T2
+        T3[📖 readMultiple]
+        PHOTON --> T3
+        T4[🔧 info]
+        PHOTON --> T4
+    end
+```
+
+
 ## 📥 Usage
 
-### Install Photon CLI
-
 ```bash
-npm install -g @portel/photon
-```
+# Install from marketplace
+photon add rss-feed
 
-### Run This Photon
-
-**Option 1: Run directly from file**
-
-```bash
-# Clone/download the photon file
-photon mcp ./rss-feed.photon.ts
-```
-
-**Option 2: Install to ~/.photon/ (recommended)**
-
-```bash
-# Copy to photon directory
-cp rss-feed.photon.ts ~/.photon/
-
-# Run by name
-photon mcp rss-feed
-```
-
-**Option 3: Use with Claude Desktop**
-
-```bash
-# Generate MCP configuration
-photon mcp rss-feed --config
-
-# Add the output to ~/Library/Application Support/Claude/claude_desktop_config.json
+# Get MCP config for your client
+photon info rss-feed --mcp
 ```
 
 ## 📦 Dependencies
 
+No external dependencies.
 
-No external dependencies required.
+---
 
-
-## 📄 License
-
-MIT • Version 1.4.1
+MIT · v1.18.0

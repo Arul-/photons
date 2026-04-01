@@ -1,19 +1,12 @@
-# Github Pr Notifier
+# GitHub PR Notifier Workflow Monitors GitHub PRs and sends notifications to Slack This workflow demonstrates:
 
-GitHub PR Notifier Workflow Monitors GitHub PRs and sends notifications to Slack
+Multi-MCP orchestration (GitHub + Slack) - Generator pattern for progress updates - State management via filesystem MCP
 
-## 📋 Overview
+> **2 tools** · Workflow Photon · v1.18.0 · MIT
 
-**Version:** 1.4.1
-**Author:** Unknown
-**License:** MIT
+**Platform Features:** `generator` `streaming` `channels`
 
 ## ⚙️ Configuration
-
-### Environment Variables
-
-
-
 
 No configuration required.
 
@@ -22,24 +15,18 @@ No configuration required.
 
 ## 🔧 Tools
 
-This photon provides **2** tools:
 
-
-### `monitor`
+### `monitor` ⚡
 
 Monitor a repository for new PRs and notify Slack
 
 
-**Parameters:**
-
-
-- **`owner`** (any) - Repository owner
-
-- **`repo`** (any) - Repository name
-
-- **`channel`** (any) - Slack channel to notify
-
-- **`labels`** (any) - Optional: only notify for PRs with these labels
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `owner` | string | Yes | Repository owner |
+| `repo` | string | Yes | Repository name |
+| `channel` | string | Yes | Slack channel to notify |
+| `labels` | string[] | No | Optional: only notify for PRs with these labels |
 
 
 
@@ -48,15 +35,14 @@ Monitor a repository for new PRs and notify Slack
 ---
 
 
-### `summary`
+### `summary` ⚡
 
 Get a summary of open PRs across multiple repos
 
 
-**Parameters:**
-
-
-- **`repos`** (any) - Array of owner/repo strings
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repos` | string[] | Yes | Array of owner/repo strings |
 
 
 
@@ -68,48 +54,50 @@ Get a summary of open PRs across multiple repos
 
 
 
+## 🏗️ Architecture
+
+```mermaid
+flowchart TD
+    subgraph github_pr_notifier["📦 Github Pr Notifier"]
+        START([▶ Start])
+        N0[📢 Checking PRs for ${params.o...]
+        START --> N0
+        N1[⏳ progress]
+        N0 --> N1
+        N2[⏳ progress]
+        N1 --> N2
+        N3[📢 Notifying: PR #${pr.number}]
+        N2 --> N3
+        N4[📝 log]
+        N3 --> N4
+        N5[⏳ progress]
+        N4 --> N5
+        N6[⏳ progress]
+        N5 --> N6
+        N7[📢 Checking ${owner}/${repo}]
+        N6 --> N7
+        N8[⏳ progress]
+        N7 --> N8
+        SUCCESS([✅ Success])
+        N8 --> SUCCESS
+    end
+```
+
+
 ## 📥 Usage
 
-### Install Photon CLI
-
 ```bash
-npm install -g @portel/photon
-```
+# Install from marketplace
+photon add github-pr-notifier
 
-### Run This Photon
-
-**Option 1: Run directly from file**
-
-```bash
-# Clone/download the photon file
-photon mcp ./github-pr-notifier.photon.ts
-```
-
-**Option 2: Install to ~/.photon/ (recommended)**
-
-```bash
-# Copy to photon directory
-cp github-pr-notifier.photon.ts ~/.photon/
-
-# Run by name
-photon mcp github-pr-notifier
-```
-
-**Option 3: Use with Claude Desktop**
-
-```bash
-# Generate MCP configuration
-photon mcp github-pr-notifier --config
-
-# Add the output to ~/Library/Application Support/Claude/claude_desktop_config.json
+# Get MCP config for your client
+photon info github-pr-notifier --mcp
 ```
 
 ## 📦 Dependencies
 
+No external dependencies.
 
-No external dependencies required.
+---
 
-
-## 📄 License
-
-MIT • Version 1.4.1
+MIT · v1.18.0

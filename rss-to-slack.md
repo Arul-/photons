@@ -1,19 +1,12 @@
 # Rss To Slack
 
-RSS to Slack Workflow Monitors RSS feeds and posts new items to Slack
+RSS to Slack Workflow Monitors RSS feeds and posts new items to Slack This demonstrates: 1. Using `@mcp` to declare MCP dependencies 2. Generator pattern with yield for interactive workflows 3. Multi-MCP orchestration in a single Photon
 
-## 📋 Overview
+> **2 tools** · Workflow Photon · v1.18.0 · MIT
 
-**Version:** 1.4.1
-**Author:** Unknown
-**License:** MIT
+**Platform Features:** `generator` `elicitation` `streaming` `channels`
 
 ## ⚙️ Configuration
-
-### Environment Variables
-
-
-
 
 No configuration required.
 
@@ -22,10 +15,8 @@ No configuration required.
 
 ## 🔧 Tools
 
-This photon provides **2** tools:
 
-
-### `monitor`
+### `monitor` ⚡
 
 Monitor an RSS feed and post new items to Slack Uses generators to emit progress updates
 
@@ -36,7 +27,7 @@ Monitor an RSS feed and post new items to Slack Uses generators to emit progress
 ---
 
 
-### `setup`
+### `setup` ⚡
 
 Interactive setup - asks user for configuration
 
@@ -50,48 +41,56 @@ Interactive setup - asks user for configuration
 
 
 
+## 🏗️ Architecture
+
+```mermaid
+flowchart TD
+    subgraph rss_to_slack["📦 Rss To Slack"]
+        START([▶ Start])
+        N0[📢 Fetching RSS feed: ${params...]
+        START --> N0
+        N1[⏳ progress]
+        N0 --> N1
+        N2[⏳ progress]
+        N1 --> N2
+        N3[📢 Posting: ${item.title}]
+        N2 --> N3
+        N4[📝 log]
+        N3 --> N4
+        N5[⏳ progress]
+        N4 --> N5
+        N6[⏳ progress]
+        N5 --> N6
+        N7{✏️ text}
+        N6 --> N7
+        N8{✏️ text}
+        N7 --> N8
+        N9{🙋 confirm}
+        N8 --> N9
+        N10([❌ Cancelled])
+        N9 -->|No| N10
+        N9 -->|Yes| N11
+        N11[Continue]
+        SUCCESS([✅ Success])
+        N11 --> SUCCESS
+    end
+```
+
+
 ## 📥 Usage
 
-### Install Photon CLI
-
 ```bash
-npm install -g @portel/photon
-```
+# Install from marketplace
+photon add rss-to-slack
 
-### Run This Photon
-
-**Option 1: Run directly from file**
-
-```bash
-# Clone/download the photon file
-photon mcp ./rss-to-slack.photon.ts
-```
-
-**Option 2: Install to ~/.photon/ (recommended)**
-
-```bash
-# Copy to photon directory
-cp rss-to-slack.photon.ts ~/.photon/
-
-# Run by name
-photon mcp rss-to-slack
-```
-
-**Option 3: Use with Claude Desktop**
-
-```bash
-# Generate MCP configuration
-photon mcp rss-to-slack --config
-
-# Add the output to ~/Library/Application Support/Claude/claude_desktop_config.json
+# Get MCP config for your client
+photon info rss-to-slack --mcp
 ```
 
 ## 📦 Dependencies
 
+No external dependencies.
 
-No external dependencies required.
+---
 
-
-## 📄 License
-
-MIT • Version 1.4.1
+MIT · v1.18.0

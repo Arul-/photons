@@ -1,10 +1,10 @@
-# Agent Runner
+# Claude Runner
 
-Agent Runner — executes Claude agents locally per WhatsApp group. Each group gets an isolated working directory with its own CLAUDE.md for persistent memory. Spawns `claude -p` as a subprocess with the group folder as cwd. Manages concurrency so multiple groups don't overwhelm the system.
+Claude Runner — executes Claude agents locally per group folder. Each group gets an isolated working directory with its own CLAUDE.md for persistent memory. Spawns `claude -p` as a subprocess with the group folder as cwd. Manages concurrency so multiple groups don't overwhelm the system. Includes conversation memory injection for groups without a live session.
 
-> **5 tools** · API Photon · v1.0.0 · MIT
+> **4 tools** · API Photon · v1.0.0 · MIT
 
-**Platform Features:** `custom-ui` `stateful` `dashboard`
+**Platform Features:** `stateful`
 
 ## ⚙️ Configuration
 
@@ -14,17 +14,6 @@ No configuration required.
 
 
 ## 🔧 Tools
-
-
-### `main`
-
-Agent Runner Dashboard
-
-
-
-
-
----
 
 
 ### `run`
@@ -40,6 +29,7 @@ Run a prompt against a group's context using Claude. Returns the agent's text re
 | `sessionId` | string | No | Optional session ID for conversation continuity |
 | `systemPrompt` | string | No | Optional extra system context prepended to the group's CLAUDE.md |
 | `addDirs` | string[] | No | Additional directories Claude can access (e.g. media download dirs) |
+| `agent` | string | No | Agent name (ignored — satisfies router contract) |
 
 
 
@@ -93,19 +83,17 @@ List all group folders with their CLAUDE.md content summary.
 
 ```mermaid
 flowchart LR
-    subgraph agent_runner["📦 Agent Runner"]
+    subgraph claude_runner["📦 Claude Runner"]
         direction TB
         PHOTON((🎯))
-        T0[🔧 main]
+        T0[▶️ run]
         PHOTON --> T0
-        T1[▶️ run]
+        T1[🔧 status]
         PHOTON --> T1
-        T2[🔧 status]
+        T2[🔧 kill]
         PHOTON --> T2
-        T3[🔧 kill]
+        T3[🔧 groups]
         PHOTON --> T3
-        T4[🔧 groups]
-        PHOTON --> T4
     end
 ```
 
@@ -114,10 +102,10 @@ flowchart LR
 
 ```bash
 # Install from marketplace
-photon add agent-runner
+photon add claude-runner
 
 # Get MCP config for your client
-photon info agent-runner --mcp
+photon info claude-runner --mcp
 ```
 
 ## 📦 Dependencies

@@ -1,46 +1,28 @@
 # Knowledge Graph
 
-Persistent knowledge graph with entities and relations
+P2P Knowledge Graph — Shared Research & Discovery Build and collaborate on a semantic knowledge graph. Features: Local graph storage, P2P sync, and AI-powered concept extraction.
 
-## 📋 Overview
+> **5 tools** · API Photon · v1.0.0 · MIT
 
-**Version:** 1.0.0
-**Author:** Portel
-**License:** MIT
+**Platform Features:** `custom-ui`
 
 ## ⚙️ Configuration
 
-### Environment Variables
 
-
-- **`KNOWLEDGE_GRAPH_STORAGE_PATH`** [OPTIONAL]
-  - Type: string
-  - Description: Path to store knowledge graph JSON (default: ~/.photon/knowledge-graph.json)
-  
+| Variable | Required | Type | Description |
+|----------|----------|------|-------------|
+| `KNOWLEDGE_GRAPH_CLAUDE` | Yes | any | No description available |
 
 
 
-
-
-### Setup Instructions
-
-- storage_path: Path to store knowledge graph JSON (default: ~/.photon/knowledge-graph.json)
 
 
 ## 🔧 Tools
 
-This photon provides **11** tools:
 
+### `main`
 
-### `entities`
-
-Create new entities with observations
-
-
-**Parameters:**
-
-
-- **`entities`** (any) [min: 1] - Array of entities to create (e.g., `[{"name":"project-api","entityType":"project","observations":["80% complete"]}]`)
+Main entry point for the Graph UI
 
 
 
@@ -49,15 +31,9 @@ Create new entities with observations
 ---
 
 
-### `relations`
+### `add_node`
 
-Create relations between entities
-
-
-**Parameters:**
-
-
-- **`relations`** (any) [min: 1] - Array of relations (e.g., `[{"from":"user","to":"project-api","relationType":"working_on"}]`)
+Add a new concept/node to the graph.
 
 
 
@@ -66,17 +42,9 @@ Create relations between entities
 ---
 
 
-### `observe`
+### `add_edge`
 
-Add observations to an entity
-
-
-**Parameters:**
-
-
-- **`entityName`** (any) [min: 1] - Entity name (e.g., `project-api`)
-
-- **`observations`** (any) [min: 1] - Array of observation strings (e.g., `["deployed to staging"]`)
+Create a relationship between two nodes.
 
 
 
@@ -85,34 +53,14 @@ Add observations to an entity
 ---
 
 
-### `removeEntities`
+### `extract_knowledge`
 
-Delete entities and their relations
-
-
-**Parameters:**
+Use AI to extract knowledge (nodes & edges) from raw text.
 
 
-- **`entityNames`** (any) [min: 1] - Array of entity names to delete (e.g., `["old-project","archived-task"]`)
-
-
-
-
-
----
-
-
-### `removeObservations`
-
-Delete specific observations from an entity
-
-
-**Parameters:**
-
-
-- **`entityName`** (any) [min: 1] - Entity name
-
-- **`observations`** (any) [min: 1] - Array of observations to delete (exact match)
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `text` | string | Yes | Raw research notes or text |
 
 
 
@@ -121,90 +69,9 @@ Delete specific observations from an entity
 ---
 
 
-### `removeRelations`
+### `clear_graph`
 
-Delete relations
-
-
-**Parameters:**
-
-
-- **`relations`** (any) [min: 1] - Array of relations to delete
-
-
-
-
-
----
-
-
-### `graph`
-
-Read the entire knowledge graph
-
-
-
-
-
----
-
-
-### `search`
-
-Search for entities matching a query
-
-
-**Parameters:**
-
-
-- **`query`** (any) [min: 1] - Search query (searches names, types, and observations) (e.g., `TypeScript`)
-
-
-
-
-
----
-
-
-### `nodes`
-
-Open specific entities by name with their relations
-
-
-**Parameters:**
-
-
-- **`names`** (any) [min: 1] - Array of entity names to retrieve (e.g., `["user","project-api"]`)
-
-
-
-
-
----
-
-
-### `clear`
-
-Clear the entire knowledge graph
-
-
-
-
-
----
-
-
-### `export`
-
-Export knowledge graph in various formats
-
-
-**Parameters:**
-
-
-- **`format`** (any) [choice: json,mermaid] - Export format {@default mermaid}
-
-- **`path`** (any) - Optional file path to save the export (e.g., `~/exports/graph.json`)
+Clear the current graph.
 
 
 
@@ -214,50 +81,43 @@ Export knowledge graph in various formats
 
 
 
+
+
+## 🏗️ Architecture
+
+```mermaid
+flowchart LR
+    subgraph knowledge_graph["📦 Knowledge Graph"]
+        direction TB
+        PHOTON((🎯))
+        T0[🔧 main]
+        PHOTON --> T0
+        T1[✏️ add_node]
+        PHOTON --> T1
+        T2[✏️ add_edge]
+        PHOTON --> T2
+        T3[🔧 extract_knowledge]
+        PHOTON --> T3
+        T4[🗑️ clear_graph]
+        PHOTON --> T4
+    end
+```
 
 
 ## 📥 Usage
 
-### Install Photon CLI
-
 ```bash
-npm install -g @portel/photon
-```
+# Install from marketplace
+photon add knowledge-graph
 
-### Run This Photon
-
-**Option 1: Run directly from file**
-
-```bash
-# Clone/download the photon file
-photon mcp ./knowledge-graph.photon.ts
-```
-
-**Option 2: Install to ~/.photon/ (recommended)**
-
-```bash
-# Copy to photon directory
-cp knowledge-graph.photon.ts ~/.photon/
-
-# Run by name
-photon mcp knowledge-graph
-```
-
-**Option 3: Use with Claude Desktop**
-
-```bash
-# Generate MCP configuration
-photon mcp knowledge-graph --config
-
-# Add the output to ~/Library/Application Support/Claude/claude_desktop_config.json
+# Get MCP config for your client
+photon info knowledge-graph --mcp
 ```
 
 ## 📦 Dependencies
 
+No external dependencies.
 
-No external dependencies required.
+---
 
-
-## 📄 License
-
-MIT • Version 1.0.0
+MIT · v1.0.0 · Portel

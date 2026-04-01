@@ -1,19 +1,11 @@
 # Social Formatter
 
-Social Media Formatter
+Social Media Formatter Takes markdown content and formats it optimally for different social media platforms. Each platform has different constraints (character limits, formatting support, etc.)
 
-## 📋 Overview
+> **4 tools** · API Photon · v1.18.0 · MIT
 
-**Version:** 1.4.1
-**Author:** Unknown
-**License:** MIT
 
 ## ⚙️ Configuration
-
-### Environment Variables
-
-
-
 
 No configuration required.
 
@@ -22,22 +14,17 @@ No configuration required.
 
 ## 🔧 Tools
 
-This photon provides **4** tools:
-
 
 ### `format`
 
 Format markdown content for multiple social media platforms
 
 
-**Parameters:**
-
-
-- **`content`** (any) - - Markdown content to format
-
-- **`platforms`** (any, optional) - - Target platforms
-
-- **`includeHashtags`** (any) - - Auto-extract hashtags from content
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `content` | string | Yes | - Markdown content to format |
+| `platforms` | string[] | No | - Target platforms |
+| `includeHashtags` | boolean | No | - Auto-extract hashtags from content |
 
 
 
@@ -82,52 +69,42 @@ Create a thread from long content (for Twitter, Threads, etc.)
 
 
 
+## 🏗️ Architecture
+
+```mermaid
+flowchart LR
+    subgraph social_formatter["📦 Social Formatter"]
+        direction TB
+        PHOTON((🎯))
+        T0[🔧 format]
+        PHOTON --> T0
+        T1[🔧 formatSingle]
+        PHOTON --> T1
+        T2[📖 getPlatforms]
+        PHOTON --> T2
+        T3[✏️ createThread]
+        PHOTON --> T3
+    end
+```
+
+
 ## 📥 Usage
 
-### Install Photon CLI
-
 ```bash
-npm install -g @portel/photon
-```
+# Install from marketplace
+photon add social-formatter
 
-### Run This Photon
-
-**Option 1: Run directly from file**
-
-```bash
-# Clone/download the photon file
-photon mcp ./social-formatter.photon.ts
-```
-
-**Option 2: Install to ~/.photon/ (recommended)**
-
-```bash
-# Copy to photon directory
-cp social-formatter.photon.ts ~/.photon/
-
-# Run by name
-photon mcp social-formatter
-```
-
-**Option 3: Use with Claude Desktop**
-
-```bash
-# Generate MCP configuration
-photon mcp social-formatter --config
-
-# Add the output to ~/Library/Application Support/Claude/claude_desktop_config.json
+# Get MCP config for your client
+photon info social-formatter --mcp
 ```
 
 ## 📦 Dependencies
 
 
-This photon automatically installs the following dependencies:
-
 ```
 @portel/photon-core@latest
 ```
 
+---
 
-## 📄 License
-
-MIT • Version 1.4.1
+MIT · v1.18.0
