@@ -30,8 +30,8 @@ import { Photon } from '@portel/photon-core';
  * @photon telegram telegram
  * @photon router agent-router
  * @photon courier courier
- * @photon chat ./chat.photon.ts
- * @photon mentor ./mentor.photon.ts
+ * @photon chat chat
+ * @photon mentor mentor
  * @ui dashboard ./ui/dashboard.html
  */
 export default class Claw extends Photon {
